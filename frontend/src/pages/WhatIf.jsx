@@ -2,13 +2,12 @@ import { useEffect, useId, useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { compact, inr, pct, plus, post, useApi } from '../api'
 import Icon from '../icons'
-import { Disclosure, Hint } from '../ui'
+import { WinnerCard } from '../decision'
+import { Disclosure } from '../ui'
 import { Loading, Tip } from '../components'
-import { C, axis, shortName } from '../lib'
+import { C, axis, fx, nameOf, shortName } from '../lib'
 
 const DIMS = [['profitability', 'Profitability'], ['growth', 'Growth'], ['revenue', 'Revenue'], ['inventory', 'Inventory'], ['cac', 'CAC'], ['risk', 'Risk']]
-const fx = (n) => '₹' + n.toFixed(2)
-const nameOf = (x) => `${x.sku_name} × ${x.platform}`
 
 function Slider({ label, value, min, max, step, onChange, fmt }) {
   const id = useId()
@@ -113,28 +112,6 @@ function Simulator({ plan, company, preset }) {
           {!out && <Loading />}
           {out?.data && <div className={'stack fade' + (busy ? ' stale' : '')}><Result res={out.data} /></div>}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function WinnerCard({ label, w, tone, other }) {
-  if (!w) return <div className="card wcard"><div className="eyebrow">{label}</div><p className="muted">No campaign clears the guardrails.</p></div>
-  const d = other ? w.profit_per_rupee - other.profit_per_rupee : 0
-  return (
-    <div className={'card wcard ' + (tone || '')}>
-      <div className="eyebrow">{label}</div>
-      <h3 className="wname">{w.sku_name}<span> × {w.platform}</span></h3>
-      <div className="muted small">{w.campaign}</div>
-      <div className="wnum">
-        <Hint k="ppr" align="left"><span className="eyebrow">Profit / ₹1</span></Hint>
-        <b className="num up">{fx(w.profit_per_rupee)}</b>
-        {other && Math.abs(d) >= 0.005 && <span className={'num small ' + (d > 0 ? 'up' : 'down')}>{d > 0 ? '+' : '−'}{fx(Math.abs(d))} vs baseline</span>}
-      </div>
-      <div className="wmeta small">
-        <span><span className="muted">Allocation</span> <b className="num">{inr(w.current)} → {inr(w.recommended)}</b></span>
-        <span><span className="muted">Expected</span> <b className="num up">{plus(w.recommended_profit)}/day</b></span>
-        <span><Hint k="conf" align="left"><span className="muted">Confidence</span></Hint> <b className="num">{pct(w.confidence)}</b></span>
       </div>
     </div>
   )

@@ -120,19 +120,37 @@ test('approve → outcome → decision history', async ({ page, request }) => {
   await expect(page.locator('.table tbody tr').filter({ hasText: fresh.title.slice(0, 30) }).first()).toBeVisible()
 })
 
-test('guided demo walks data → feedback and opens the simulator on the demo company', async ({ page, request }) => {
+test('guided demo tells the full story and ends on the calculated next-₹1 winner', async ({ page, request }) => {
+  const demo = await api(request, '/demo')
   await page.goto('/')
   await switchBrand(page, (await api(request, '/companies')).find((c) => c.company_id === 'electronics').name)
   await page.getByRole('button', { name: 'Guided Demo' }).click()
-  await expect(page.getByRole('heading', { name: /Guided demo/ })).toBeVisible()
-  for (const next of ['Diagnosis', 'Decision', 'What-if', 'Feedback']) await page.getByRole('button', { name: new RegExp('^Next: ' + next) }).click()
+  await expect(page.getByText(/Guided demo · Premium Fashion/)).toBeVisible()
+  for (const next of ['Diagnose', 'Compare', 'Decide', 'Simulate', 'Approve']) await page.getByRole('button', { name: new RegExp('^Next: ' + next) }).click()
   await page.getByRole('button', { name: /Approve & simulate/ }).click()
-  await expect(page.getByText('Approved & scored')).toBeVisible()
-  await page.locator('.stepper').getByRole('button', { name: /What-if/ }).click()
-  await page.getByRole('button', { name: /Open in simulator/ }).click()
+  await expect(page.getByText('prediction → actual → error → confidence')).toBeVisible()
+  const win = demo.step_compare.next_rupee
+  await expect(page.locator('.final .winner')).toHaveText(`${win.sku_name} × ${win.platform}`)
+  await page.locator('.story').getByRole('button', { name: 'Simulate' }).click()
+  await page.getByRole('button', { name: /Open in the simulator/ }).click()
   await expect(page.locator('.cmp')).toBeVisible()
   await expect(page.getByLabel('Product')).toHaveValue('fashion-scarf')
   await expect(page.getByText('Winner changed', { exact: true })).toBeVisible()
+})
+
+test('profile and optimizer surface policy and decision hierarchy', async ({ page, request }) => {
+  const plan = await api(request, '/plan?company_id=fashion')
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Budget Optimizer' }).click()
+  await expect(page.locator('.winner')).toHaveText(`${plan.next_rupee.sku_name} × ${plan.next_rupee.platform}`)
+  await expect(page.getByText(/Why .* lost/)).toBeVisible()
+  await page.locator('.prow .row-btn').first().click()
+  await expect(page.locator('.prow-detail .hint-btn', { hasText: /^ROAS$/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Company Profile' }).click()
+  await expect(page.getByText(/Optimises for/)).toBeVisible()
+  await expect(page.locator('.guards dd')).toHaveCount(4)
+  await page.getByRole('button', { name: /Budget change per campaign/ }).click()
+  await expect(page.getByRole('region', { name: /by policy/ })).toBeVisible()
 })
 
 test('loading skeleton and API error states', async ({ page }) => {

@@ -24,9 +24,10 @@ def demo(con) -> dict:
         step1_data=dict(reconciliation=svc.reconciliation(d), campaign=plan["campaigns"][DEMO_CAMPAIGN],
                         series=svc.campaign_series(con, DEMO_COMPANY, DEMO_CAMPAIGN)["series"]),
         step2_diagnosis=anomaly,
+        step_compare=dict(next_rupee=plan["next_rupee"], roas_trap=plan["roas_trap"], candidates=plan["candidates"]),
         step3_decision=decision,
         step4_whatif=dict(
-            scenario=scenario, stock_units=DEMO_STOCK_UNITS, changed=wi["changed"], narrative=wi["narrative"],
+            scenario=scenario, stock_units=DEMO_STOCK_UNITS, changed=wi["changed"], next_rupee=wi["next_rupee"], narrative=wi["narrative"],
             top_before=wi["top_before"], top_after=wi["top_after"], profit_delta=wi["profit_delta"],
             recommendations_after=wi["scenario"]["recommendations"][:4], allocation_diff=wi["allocation_diff"],
             target_cover_before=sku["inventory_days"],

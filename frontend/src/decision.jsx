@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { inr, pct, plus } from './api'
 import Icon from './icons'
-import { nameOf } from './lib'
+import { fx, nameOf } from './lib'
 import { Bars, Drawer, Health, Hint, Metric, Section } from './ui'
 
 const ACTION = { increase: 'Increase', decrease: 'Decrease', hold: 'Hold', pause: 'Pause' }
-const fx = (n, d = 2) => '₹' + n.toFixed(d)
 
 /** The answer: where the next ₹1 goes. Everything else on the page is evidence for this. */
 export function Verdict({ w, company, onReview, onOpen, hasRec }) {
@@ -196,5 +195,28 @@ export function CandidateDrawer({ x, winner, onClose }) {
         <p className="muted small">{ACTION[x.action]} · expected {plus(x.recommended_profit)}/day · creative {x.creative_age} days old{x.anomaly ? ` · ${x.anomaly.replace(/_/g, ' ')}` : ''}</p>
       </Section>
     </Drawer>
+  )
+}
+
+/** Winner summary used by the simulator and the guided demo. `other` adds a delta vs a baseline winner. */
+export function WinnerCard({ label, w, tone, other }) {
+  if (!w) return <div className="card wcard"><div className="eyebrow">{label}</div><p className="muted">No campaign clears the guardrails.</p></div>
+  const d = other ? w.profit_per_rupee - other.profit_per_rupee : 0
+  return (
+    <div className={'card wcard ' + (tone || '')}>
+      <div className="eyebrow">{label}</div>
+      <h3 className="wname">{w.sku_name}<span> × {w.platform}</span></h3>
+      <div className="muted small">{w.campaign}</div>
+      <div className="wnum">
+        <Hint k="ppr" align="left"><span className="eyebrow">Profit / ₹1</span></Hint>
+        <b className="num up">{fx(w.profit_per_rupee)}</b>
+        {other && Math.abs(d) >= 0.005 && <span className={'num small ' + (d > 0 ? 'up' : 'down')}>{d > 0 ? '+' : '−'}{fx(Math.abs(d))} vs baseline</span>}
+      </div>
+      <div className="wmeta small">
+        <span><span className="muted">Allocation</span> <b className="num">{inr(w.current)} → {inr(w.recommended)}</b></span>
+        <span><span className="muted">Expected</span> <b className="num up">{plus(w.recommended_profit)}/day</b></span>
+        <span><Hint k="conf" align="left"><span className="muted">Confidence</span></Hint> <b className="num">{pct(w.confidence)}</b></span>
+      </div>
+    </div>
   )
 }

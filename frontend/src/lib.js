@@ -28,3 +28,13 @@ export const GLOSS = {
 export const nameOf = (x) => `${x.sku_name} × ${x.platform}`
 
 export const shortName = (n) => n.replace(' · ', ' ').replace('Lookalike 1%', 'LAL').replace('Interest-based', 'Interest').replace('Retargeting 30d', 'RT').replace(' · ', ' ')
+export const fx = (n, d = 2) => '₹' + n.toFixed(d)
+
+export const DIM_NOTE = {
+  profitability: 'Weight on contribution profit after COGS and ad spend.',
+  growth: 'Weight on acquiring new customers, valued at lifetime value.',
+  revenue: 'Weight on top-line revenue.',
+  inventory: 'Weight on moving stock that is piling up and protecting stock that is running out.',
+  cac: 'Weight on keeping acquisition cost and ROAS inside their limits.',
+  risk: 'Weight on avoiding volatile or flagged campaigns.',
+}

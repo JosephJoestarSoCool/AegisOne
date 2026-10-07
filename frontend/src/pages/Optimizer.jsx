@@ -1,61 +1,155 @@
+import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { compact, inr, plus, useApi } from '../api'
-import { Kpi, Loading, RecCard, Tip } from '../components'
-import { C, axis, shortName } from '../lib'
+import { compact, inr, pct, plus, useApi } from '../api'
+import { Loading, RecCard, Tip } from '../components'
+import { CandidateDrawer } from '../decision'
+import Icon from '../icons'
+import { C, axis, fx, nameOf, shortName } from '../lib'
+import { Disclosure, Health, Hint, Metric } from '../ui'
+
+const ACTION = { increase: 'Increase', decrease: 'Decrease', hold: 'Hold', pause: 'Pause' }
 
 export default function Optimizer({ company }) {
   const { data, error, reload } = useApi('/plan', { company_id: company })
+  const [sel, setSel] = useState(null)
+  const cmap = useMemo(() => Object.fromEntries((data?.candidates ?? []).map((c) => [c.campaign_id, c])), [data])
   if (!data) return <div className="page"><Loading error={error} /></div>
-  const t = data.totals
+  const t = data.totals, w = data.next_rupee
+  const runner = w?.alternatives?.[0]
+  const moves = data.recommendations
   const chart = data.allocation.map((a) => ({ name: shortName(a.name), Current: a.current, Recommended: a.recommended }))
   return (
     <div className="page">
-      <div className="grid g4">
-        <Kpi label="Daily budget" value={inr(t.budget_after)} />
-        <div className="card kpi"><div className="label">Budget moved</div><div className="value num">{inr(t.moved)}</div><div className="muted small">{((t.moved / t.budget_before) * 100).toFixed(0)}% of total · total spend unchanged</div></div>
-        <div className="card kpi"><div className="label">Expected incremental profit</div><div className="value up num">{plus(t.incremental_profit)}</div><div className="muted small">per day</div></div>
-        <div className="card kpi"><div className="label">30-day impact</div><div className="value up num">{compact(t.incremental_profit_30d)}</div><div className="muted small">model estimate · {data.policy.name} policy</div></div>
-      </div>
-
-      <div className="card">
-        <h3>Current vs recommended daily allocation</h3>
-        <ResponsiveContainer width="100%" height={Math.max(300, data.allocation.length * 34)}>
-          <BarChart data={chart} layout="vertical" margin={{ left: 16, right: 16 }} barCategoryGap={6}>
-            <CartesianGrid stroke={C.line} horizontal={false} />
-            <XAxis type="number" {...axis} tickFormatter={compact} />
-            <YAxis type="category" dataKey="name" {...axis} width={170} />
-            <Tooltip content={<Tip fmt={(v) => inr(v)} />} cursor={{ fill: 'rgba(255,255,255,.04)' }} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="Current" fill="#3a4a6d" radius={3} isAnimationActive={false} />
-            <Bar dataKey="Recommended" fill={C.gold} radius={3} isAnimationActive={false} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div>
-        <div className="row between" style={{ marginBottom: 12 }}><h3 style={{ margin: 0 }}>Recommendations · ranked by expected incremental profit</h3><span className="muted small">{data.recommendations.length} actions</span></div>
-        <div className="stack">
-          {data.recommendations.map((r, i) => <RecCard key={r.rec_id} rec={r} top={i === 0} onDecided={reload} expanded={false} />)}
-          {!data.recommendations.length && <div className="card empty">No move clears the guardrails under this policy.</div>}
+      <section className="card verdict" aria-labelledby="opt-h">
+        <div className="verdict-main">
+          <div className="eyebrow">Decision workspace · {data.policy.name} policy</div>
+          {w ? (
+            <>
+              <h2 id="opt-h" className="winner">{w.sku_name}<span> × {w.platform}</span></h2>
+              <div className="muted">Wins the next marginal ₹1 · {w.campaign}</div>
+            </>
+          ) : <h2 id="opt-h" className="winner">No move clears the guardrails</h2>}
+          <div className="verdict-kpis">
+            <div className="hero-num">
+              <Hint k="ppr" align="left"><span className="eyebrow">Incremental profit</span></Hint>
+              <b className="num up">{plus(t.incremental_profit)}<small>/day</small></b>
+              <span className="muted small">≈ {compact(t.incremental_profit_30d)} / 30 days</span>
+            </div>
+            {w && (
+              <div className="alloc">
+                <Hint k="ppr" align="left"><span className="eyebrow">Profit / ₹1</span></Hint>
+                <b className="num up" style={{ fontSize: 24 }}>{fx(w.profit_per_rupee)}</b>
+              </div>
+            )}
+            <div className="alloc">
+              <span className="eyebrow">Budget moved</span>
+              <b className="num" style={{ fontSize: 24 }}>{inr(t.moved)}</b>
+              <span className="muted small">{pct(t.moved / t.budget_before)} of budget · total spend unchanged</span>
+            </div>
+          </div>
         </div>
-      </div>
+        {w && (
+          <div className="verdict-why">
+            <div className="eyebrow">Why it won</div>
+            <ul className="why">{w.why_won.slice(0, 3).map((x, i) => <li key={i}>{x}</li>)}</ul>
+            {runner && (
+              <>
+                <div className="eyebrow" style={{ marginTop: 6 }}>Why {nameOf(runner)} lost</div>
+                <ul className="lost">{runner.why_lost.slice(0, 2).map((x, i) => <li key={i}>{x}</li>)}</ul>
+                <button className="link-btn" onClick={() => setSel(runner)}>Compare in detail</button>
+              </>
+            )}
+          </div>
+        )}
+      </section>
 
-      <div className="card">
-        <h3>Allocation detail</h3>
-        <table className="table">
-          <thead><tr><th>Campaign</th><th className="r">Current</th><th className="r">Recommended</th><th className="r">Δ</th><th className="r">ROAS</th><th className="r">Marg. ROAS</th><th className="r">Marg. profit/₹</th><th style={{ width: 130 }}>Opportunity</th></tr></thead>
-          <tbody>{data.allocation.map((a) => (
-            <tr key={a.campaign_id}>
-              <td><b>{a.name}</b>{a.action === 'pause' && <span className="pill red" style={{ marginLeft: 8 }}>paused</span>}{!a.eligible && a.action !== 'pause' && <span className="pill" style={{ marginLeft: 8 }} title="Fails a guardrail for scaling">gated</span>}</td>
-              <td className="r num">{inr(a.current)}</td><td className="r num">{inr(a.recommended)}</td>
-              <td className={'r num ' + (a.delta > 0 ? 'up' : a.delta < 0 ? 'down' : 'muted')}>{a.delta ? plus(a.delta) : '—'}</td>
-              <td className="r num">{a.roas.toFixed(2)}</td><td className="r num">{a.marginal_roas.toFixed(2)}</td>
-              <td className={'r num ' + (a.marginal_profit_per_rupee < 0 ? 'down' : '')}>{a.marginal_profit_per_rupee.toFixed(2)}</td>
-              <td><div className="bar"><i style={{ width: '100%', transform: `scaleX(${a.opportunity_score / 100})` }} /></div></td>
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
+      <section aria-labelledby="moves-h">
+        <div className="row between wrap" style={{ marginBottom: 10 }}>
+          <h3 id="moves-h" className="sec-h">Where budget moves</h3>
+          <span className="muted small">{moves.length} actions · ranked by expected incremental profit</span>
+        </div>
+        <Moves moves={moves} reload={reload} />
+      </section>
+
+      <section className="card" aria-labelledby="alloc-h">
+        <h3 id="alloc-h">Allocation by campaign</h3>
+        <div className="tscroll" tabIndex={0} role="region" aria-label="Allocation by campaign, scrollable">
+          <table className="table ptable">
+            <thead><tr><th>Campaign</th><th className="r">Daily budget</th><th className="r"><Hint k="ppr" align="right"><span>Profit / ₹1</span></Hint></th><th className="hide-sm">Action</th><th className="hide-sm"><Hint k="health"><span>Health</span></Hint></th><th /></tr></thead>
+            <tbody>{data.allocation.map((a) => <AllocRow key={a.campaign_id} a={a} x={cmap[a.campaign_id]} win={w?.campaign_id === a.campaign_id} onOpen={setSel} />)}</tbody>
+          </table>
+        </div>
+        <Disclosure title="Current vs recommended chart" summary="same data as the table above">
+          <div role="img" aria-label="Bar chart of current and recommended daily budget per campaign. The same values are in the allocation table above.">
+            <ResponsiveContainer width="100%" height={Math.max(300, chart.length * 32)}>
+              <BarChart data={chart} layout="vertical" margin={{ left: 16, right: 16 }} barCategoryGap={6}>
+                <CartesianGrid stroke={C.line} horizontal={false} />
+                <XAxis type="number" {...axis} tickFormatter={compact} />
+                <YAxis type="category" dataKey="name" {...axis} width={170} />
+                <Tooltip content={<Tip fmt={(v) => inr(v)} />} cursor={{ fill: 'rgba(255,255,255,.04)' }} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="Current" fill="#3a4a6d" radius={3} isAnimationActive={false} />
+                <Bar dataKey="Recommended" fill={C.gold} radius={3} isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Disclosure>
+      </section>
+      <CandidateDrawer x={sel} winner={w} onClose={() => setSel(null)} />
     </div>
+  )
+}
+
+function Moves({ moves, reload }) {
+  const [all, setAll] = useState(false)
+  if (!moves.length) return <div className="card empty">No move clears the guardrails under this policy.</div>
+  const shown = all ? moves : moves.slice(0, 3)
+  return (
+    <>
+      <div className="stack">{shown.map((r, i) => <RecCard key={r.rec_id} rec={r} top={i === 0} onDecided={reload} expanded={false} />)}</div>
+      {moves.length > 3 && <button className="btn ghost small" style={{ marginTop: 10 }} onClick={() => setAll(!all)}>{all ? 'Show top 3' : `Show all ${moves.length} actions`}</button>}
+    </>
+  )
+}
+
+function AllocRow({ a, x, win, onOpen }) {
+  const [open, setOpen] = useState(false)
+  const id = 'alloc-' + a.campaign_id
+  return (
+    <>
+      <tr className={'prow' + (win ? ' win' : '') + (!a.eligible ? ' gated' : '')}>
+        <td>
+          <button className="row-btn" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
+            <Icon name="chevron" size={14} className={'caret' + (open ? ' open' : '')} />
+            <span><b>{a.sku_name}</b><span className="muted"> · {a.platform}</span><small>{a.name}</small></span>
+          </button>
+        </td>
+        <td className="r num">
+          <span className="muted">{inr(a.current)}</span> → <b>{inr(a.recommended)}</b>
+          {a.delta !== 0 && <small className={a.delta > 0 ? 'up' : 'down'} style={{ display: 'block' }}>{plus(a.delta)}</small>}
+        </td>
+        <td className="r"><b className={'num ' + (a.marginal_profit_per_rupee < 0 ? 'down' : a.eligible ? 'up' : '')}>{fx(a.marginal_profit_per_rupee)}</b></td>
+        <td className="hide-sm"><span className={'act ' + (a.eligible || a.action === 'pause' ? a.action : 'gated')}>{!a.eligible && a.action !== 'pause' ? 'Gated' : ACTION[a.action]}</span></td>
+        <td className="hide-sm">{x && <Health h={x.health} />}</td>
+        <td className="r">{x && <button className="btn ghost small" onClick={() => onOpen(x)} aria-label={`Details for ${nameOf(a)}`}>Details</button>}</td>
+      </tr>
+      {open && (
+        <tr className="prow-detail" id={id}>
+          <td colSpan={6}>
+            <div className="metrics">
+              <Metric k="roas" label="ROAS" value={a.roas.toFixed(2) + '×'} />
+              <Metric k="mroas" label="Marginal ROAS" value={a.marginal_roas.toFixed(2) + '×'} />
+              {x && <Metric k="margin" label="Margin" value={pct(x.margin)} />}
+              {x && <Metric k="cac" label="Marginal CAC" value={x.marginal_cac ? inr(x.marginal_cac) : '—'} />}
+              {x && <Metric k="cvr" label="CVR" value={(x.cvr * 100).toFixed(1) + '%'} />}
+              {x && <Metric k="inv" label="Inventory" value={Math.round(x.inventory_days) + ' d'} />}
+              {x && <Metric k="conf" label="Confidence" value={pct(x.confidence)} />}
+              <Metric text="Share of the best opportunity’s policy-weighted value per ₹1." label="Opportunity" value={a.opportunity_score} />
+            </div>
+            {!a.eligible && x?.gate_reason && <p className="small down" style={{ marginTop: 8 }}>Gated: {x.gate_reason}</p>}
+          </td>
+        </tr>
+      )}
+    </>
   )
 }

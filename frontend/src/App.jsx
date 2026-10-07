@@ -20,7 +20,7 @@ const NAV = [
   ['history', 'Decision History', 'history'],
 ]
 const TITLES = {
-  demo: ['Guided Demo', 'data → diagnosis → decision → what-if → feedback'],
+  demo: ['Guided Demo', 'data → diagnose → compare → decide → simulate → approve → learn'],
   command: ['Command Center', 'Where should the next ₹1 of ad spend go?'],
   diagnosis: ['AI Diagnosis', 'What happened → probable cause → confidence → action'],
   optimizer: ['Budget Optimizer', 'Maximise expected incremental profit inside the company’s policy'],

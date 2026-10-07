@@ -43,7 +43,7 @@ export function Tip({ active, payload, label, fmt = (v) => v }) {
 const TYPE_TONE = { move_budget: 'gold', increase_budget: 'teal', decrease_budget: 'red', pause_campaign: 'red', replace_creative: 'violet' }
 
 /** Full recommendation card: flow, why, policy drivers, guardrails, approve/reject → feedback. */
-export function RecCard({ rec, top, onDecided, expanded = true }) {
+export function RecCard({ rec, top, onDecided, expanded = true, actions = true }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const [status, setStatus] = useState(rec.status)
@@ -113,7 +113,7 @@ export function RecCard({ rec, top, onDecided, expanded = true }) {
           ))}
         </div>
       )}
-      <div className="row between wrap">
+      {actions && (      <div className="row between wrap">
         {done ? (
           <span className={'pill ' + (status === 'approved' ? 'teal' : '')}>{status === 'approved' ? '✓ Approved' : 'Rejected'}</span>
         ) : (
@@ -124,6 +124,7 @@ export function RecCard({ rec, top, onDecided, expanded = true }) {
         )}
         {result?.actual_profit !== undefined && <Outcome r={result} />}
       </div>
+      )}
     </div>
   )
 }
