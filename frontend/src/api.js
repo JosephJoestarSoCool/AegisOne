@@ -9,23 +9,24 @@ export const get = (path, params) =>
 export const post = (path, body) =>
   fetch('/api' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(j)
 
-/** Fetch on mount and whenever path/params change. `reload()` refetches without clearing data. */
+/**
+ * Fetch on mount and whenever path/params change. Data from a previous path/params is never returned
+ * (so switching company can never show the previous company's data). `reload()` refetches in place.
+ */
 export function useApi(path, params) {
-  const [state, set] = useState({ data: null, error: null, loading: true })
+  const key = path + JSON.stringify(params)
+  const [state, set] = useState({ key, data: null, error: null })
   const seq = useRef(0)
-  const key = JSON.stringify(params)
   const load = useCallback(() => {
     const n = ++seq.current
     get(path, params)
-      .then((data) => n === seq.current && set({ data, error: null, loading: false }))
-      .catch((error) => n === seq.current && set((s) => ({ ...s, error, loading: false })))
+      .then((data) => n === seq.current && set({ key, data, error: null }))
+      .catch((error) => n === seq.current && set((s) => ({ key, data: s.key === key ? s.data : null, error })))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, key])
-  useEffect(() => {
-    set((s) => ({ ...s, loading: true }))
-    load()
-  }, [load])
-  return { ...state, reload: load }
+  }, [key])
+  useEffect(() => { load() }, [load])
+  const fresh = state.key === key
+  return { data: fresh ? state.data : null, error: fresh ? state.error : null, loading: !fresh || (!state.data && !state.error), reload: load }
 }
 
 export const inr = (n, d = 0) =>

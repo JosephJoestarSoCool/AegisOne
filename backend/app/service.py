@@ -115,7 +115,167 @@ def build_plan(con: sqlite3.Connection, company_id: str, policy_id: str | None =
             moved=sum(abs(a["delta"]) for a in allocation) / 2,
         ),
         campaigns={c["campaign_id"]: _public_campaign(c, marg[c["campaign_id"]]) for c in cprep},
+        **_portfolio(cprep, pol, marg, allocation),
     )
+
+
+def _gate_reason(c: dict, pol: Policy, units_by_sku: dict) -> str | None:
+    """Why a campaign cannot take the next rupee (None = eligible)."""
+    if not c["margin_ok"]:
+        return f"margin {c['margin']*100:.1f}% below {pol.min_margin*100:.0f}% floor"
+    t = opt.terms(c, c["b0"] + 1000.0, pol)
+    if t["orders"] <= 0:
+        return "no demand signal"
+    if t["revenue"] / (c["b0"] + 1000.0) < pol.min_roas:
+        return f"ROAS below {pol.min_roas:.1f}× floor"
+    if (c["b0"] + 1000.0) / t["orders"] > pol.max_cac:
+        return f"CAC above {inr(pol.max_cac)} cap"
+    if units_by_sku[c["sku_id"]] >= c["cap_units"]:
+        return "stock cap reached"
+    return None
+
+
+def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, x))
+
+
+def _health(c: dict, mp: float, cvr_ref: float, pol: Policy) -> dict:
+    """Transparent 0-100 campaign health: weighted blend of six 0-100 components."""
+    parts = [
+        ("Contribution profit", 0.30, _clamp((mp + 0.5) / 1.5)),
+        ("ROAS vs floor", 0.15, _clamp(c["roas"] / (2 * pol.min_roas))),
+        ("Conversion rate", 0.15, _clamp(c["cvr"] / (2 * cvr_ref)) if cvr_ref else 0.5),
+        ("Inventory fit", 0.15, 1 - c["stockout_risk"]),
+        ("Creative freshness", 0.10, _clamp(1 - c["creative_age"] / 90)),
+        ("Stability", 0.15, _clamp(1 - c["roas_cv"])),
+    ]
+    score = round(100 * sum(w * v for _, w, v in parts))
+    return dict(score=score, status="Healthy" if score >= 70 else "Watch" if score >= 45 else "At risk",
+                parts=[dict(label=n, weight=w, score=round(100 * v)) for n, w, v in parts])
+
+
+def _candidate(c: dict, m: dict, reason: str | None, a: dict, pol: Policy, cvr_ref: float) -> dict:
+    step = 1000.0
+    d_orders = opt.terms(c, c["b0"] + step, pol)["orders"] - opt.terms(c, c["b0"], pol)["orders"]
+    return dict(
+        campaign_id=c["campaign_id"], campaign=c["name"], sku_id=c["sku_id"], sku_name=c["sku_name"],
+        platform=c["platform"], audience=c["audience"], eligible=reason is None, gate_reason=reason,
+        roas=c["roas"], marginal_roas=m["marginal_roas"], profit_per_rupee=m["marginal_profit_per_rupee"],
+        policy_value_per_rupee=m["mu"], marginal_cac=step / d_orders if d_orders > 0 else None,
+        margin=c["margin"], cvr=c["cvr"], ctr=c["ctr"], cac=c["cac"], inventory_days=c["inventory_days"],
+        stockout_risk=c["stockout_risk"], lead_time=c["lead_time"], creative_age=c["creative_age"],
+        anomaly=c["anomaly"]["kind"] if c["anomaly"] else None,
+        current=c["b0"], recommended=a["recommended"], delta=a["delta"], action=a["action"],
+        recommended_profit=a["profit_new"] - a["profit_now"], step_profit=m["marginal_profit_per_rupee"] * step,
+        confidence=round(_clamp(0.5 * c["fit_quality"] + 0.3 * (1 - c["stockout_risk"]) + 0.2 * (1 - _clamp(c["roas_cv"]))), 2),
+        health=_health(c, m["marginal_profit_per_rupee"], cvr_ref, pol),
+    )
+
+
+def _why_won(w: dict, ru: dict | None, pol: Policy) -> list[str]:
+    out = []
+    if ru and w["profit_per_rupee"] > ru["profit_per_rupee"]:
+        out.append(f"Highest incremental profit per ₹1: ₹{w['profit_per_rupee']:.2f} vs ₹{ru['profit_per_rupee']:.2f} "
+                   f"for {ru['sku_name']} × {ru['platform']}.")
+    elif not ru:
+        out.append(f"Only eligible opportunity: ₹{w['profit_per_rupee']:.2f} incremental profit per ₹1.")
+    else:
+        out.append(f"Highest policy-weighted value per ₹1 ({w['policy_value_per_rupee']:.2f} vs {ru['policy_value_per_rupee']:.2f}).")
+    if ru and w["margin"] > ru["margin"]:
+        out.append(f"Better contribution margin: {w['margin']*100:.0f}% vs {ru['margin']*100:.0f}%.")
+    if ru and w["marginal_cac"] and ru["marginal_cac"] and w["marginal_cac"] < ru["marginal_cac"]:
+        out.append(f"Lower marginal CAC: {inr(w['marginal_cac'])} vs {inr(ru['marginal_cac'])}.")
+    if ru and w["cvr"] > ru["cvr"]:
+        out.append(f"Stronger conversion: {w['cvr']*100:.1f}% CVR vs {ru['cvr']*100:.1f}%.")
+    if w["stockout_risk"] < 0.2:
+        out.append(f"Stock is healthy: {w['inventory_days']:.0f} days of cover, {w['stockout_risk']*100:.0f}% stockout risk.")
+    out.append(f"Clears every guardrail: margin ≥ {pol.min_margin*100:.0f}%, ROAS ≥ {pol.min_roas:.1f}×, CAC ≤ {inr(pol.max_cac)}.")
+    return out[:5]
+
+
+def _why_lost(x: dict, w: dict) -> list[str]:
+    out = []
+    if x["gate_reason"]:
+        out.append(f"Blocked by policy: {x['gate_reason']}.")
+    if x["stockout_risk"] >= max(0.25, w["stockout_risk"] + 0.1):
+        out.append(f"Inventory constrained: {x['inventory_days']:.0f} days of cover vs {x['lead_time']:.0f}-day lead time.")
+    if x["anomaly"]:
+        out.append(f"Active issue: {x['anomaly'].replace('_', ' ')}.")
+    if x["marginal_cac"] and w["marginal_cac"] and x["marginal_cac"] > w["marginal_cac"] * 1.05:
+        out.append(f"Higher marginal CAC: {inr(x['marginal_cac'])} vs {inr(w['marginal_cac'])}.")
+    if x["margin"] < w["margin"] - 0.02:
+        out.append(f"Thinner margin: {x['margin']*100:.0f}% vs {w['margin']*100:.0f}%.")
+    if x["cvr"] < w["cvr"] * 0.95:
+        out.append(f"Weaker conversion: {x['cvr']*100:.1f}% vs {w['cvr']*100:.1f}% CVR.")
+    if x["profit_per_rupee"] < w["profit_per_rupee"]:
+        out.append(f"Lower incremental profit per ₹1: ₹{x['profit_per_rupee']:.2f} vs ₹{w['profit_per_rupee']:.2f}.")
+    return out[:3] or ["Lower policy-weighted value per ₹1."]
+
+
+def _portfolio(cprep: list[dict], pol: Policy, marg: dict, allocation: list[dict]) -> dict:
+    """Company-scoped ranking: SKU x campaign x platform -> marginal economics -> next rupee, with why / why-not / ROAS trap."""
+    units = defaultdict(float)
+    for c in cprep:
+        units[c["sku_id"]] += opt.terms(c, c["b0"], pol)["orders"]
+    alloc = {a["campaign_id"]: a for a in allocation}
+    cvrs = sorted(c["cvr"] for c in cprep if c["cvr"] > 0)
+    cvr_ref = cvrs[len(cvrs) // 2] if cvrs else 0.0
+    cands = []
+    for c in cprep:
+        m = marg[c["campaign_id"]]
+        reason = None if m["eligible"] else (_gate_reason(c, pol, units) or "gated by policy")
+        cands.append(_candidate(c, m, reason, alloc[c["campaign_id"]], pol, cvr_ref))
+    cands.sort(key=lambda x: (not x["eligible"], -x["policy_value_per_rupee"]))
+    for i, x in enumerate(cands, 1):
+        x["rank"] = i
+
+    by_sku: dict[str, list[dict]] = defaultdict(list)
+    for x in cands:
+        by_sku[x["sku_id"]].append(x)
+    spend_rev = defaultdict(lambda: [0.0, 0.0])
+    for c in cprep:
+        spend_rev[c["sku_id"]][0] += c["spend"]
+        spend_rev[c["sku_id"]][1] += c["revenue"]
+    rows = []
+    for sku_id, xs in by_sku.items():
+        b = xs[0]  # already sorted best-first
+        sp, rv = spend_rev[sku_id]
+        rows.append(dict(
+            sku_id=sku_id, sku_name=b["sku_name"], campaigns=len(xs), budget=sum(x["current"] for x in xs),
+            roas=rv / sp if sp else 0.0, margin=b["margin"], inventory_days=b["inventory_days"],
+            stockout_risk=b["stockout_risk"], best_campaign_id=b["campaign_id"], best_campaign=b["campaign"],
+            platform=b["platform"], audience=b["audience"], marginal_roas=b["marginal_roas"],
+            profit_per_rupee=b["profit_per_rupee"], policy_value_per_rupee=b["policy_value_per_rupee"],
+            eligible=b["eligible"], gate_reason=b["gate_reason"], recommended_delta=b["delta"],
+            recommended_profit=b["recommended_profit"],
+        ))
+    rows.sort(key=lambda r: (not r["eligible"], -r["policy_value_per_rupee"]))
+    for i, r in enumerate(rows, 1):
+        r["rank"] = i
+
+    win = next((x for x in cands if x["eligible"]), None)
+    next_rupee = None
+    trap = dict(active=False, message="No eligible opportunity.", roas_leader=None, winner=None)
+    if win:
+        others = [x for x in cands if x is not win]
+        runner = next((x for x in others if x["eligible"]), None)
+        next_rupee = dict(
+            next(r for r in rows if r["sku_id"] == win["sku_id"]), **win,
+            why_won=_why_won(win, runner, pol),
+            alternatives=[dict(x, why_lost=_why_lost(x, win)) for x in others[:3]],
+        )
+        leader = max(cands, key=lambda x: x["roas"])
+        if leader["campaign_id"] != win["campaign_id"]:
+            msg = (f"{leader['sku_name']} × {leader['platform']} has the highest ROAS ({leader['roas']:.1f}×) but returns "
+                   f"₹{leader['profit_per_rupee']:.2f} marginal profit per ₹1. {win['sku_name']} × {win['platform']} "
+                   f"({win['roas']:.1f}× ROAS) returns ₹{win['profit_per_rupee']:.2f}, so it wins the next rupee.")
+            if not leader["eligible"]:
+                msg += f" The ROAS leader is also blocked: {leader['gate_reason']}."
+            trap = dict(active=True, message=msg, roas_leader=leader, winner=win)
+        else:
+            trap = dict(active=False, winner=win, roas_leader=leader,
+                        message="The ROAS leader is also the marginal-profit leader here.")
+    return dict(portfolio=rows, candidates=cands, next_rupee=next_rupee, roas_trap=trap)
 
 
 def _public_campaign(c: dict, m: dict) -> dict:
@@ -321,7 +481,9 @@ def overview(con, company_id: str, policy_id: str | None = None) -> dict:
         anomalies=top_anoms, opportunities=opps, top_recommendations=plan["recommendations"][:3],
         incremental_profit=plan["totals"]["incremental_profit"],
         incremental_profit_30d=plan["totals"]["incremental_profit_30d"],
-        reconciliation=reconciliation(d),
+        reconciliation=reconciliation(d), portfolio=plan["portfolio"], candidates=plan["candidates"], next_rupee=plan["next_rupee"],
+        roas_trap=plan["roas_trap"],
+        policy=plan["policy"],
     )
 
 

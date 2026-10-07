@@ -122,3 +122,50 @@ def test_feedback_loop(con):
     fb.record_decision(con, rec, True)          # idempotent
     again = svc.build_plan(con, DEMO_COMPANY)
     assert next(r for r in again["recommendations"] if r["rec_id"] == rec["rec_id"])["status"] == "approved"
+
+
+@pytest.mark.parametrize("cid", COMPANIES)
+def test_company_isolation(con, cid):
+    """Nothing from another company may leak into any company-scoped output."""
+    plan = svc.build_plan(con, cid)
+    ov = svc.overview(con, cid)
+    assert plan["company_id"] == cid and ov["company"]["company_id"] == cid
+    assert all(k.startswith(cid + "-") for k in plan["campaigns"])
+    assert all(a["campaign_id"].startswith(cid + "-") and a["sku_id"].startswith(cid + "-") for a in plan["allocation"])
+    assert all(a.get("campaign_id") is None or a["campaign_id"].startswith(cid + "-") for a in plan["anomalies"])
+    for r in plan["recommendations"]:
+        assert r["company_id"] == cid
+        for k in ("source_campaign_id", "target_campaign_id"):
+            assert r[k] is None or r[k].startswith(cid + "-")
+    assert all(r["sku_id"].startswith(cid + "-") and r["best_campaign_id"].startswith(cid + "-") for r in plan["portfolio"])
+    assert ov["next_rupee"]["sku_id"].startswith(cid + "-")
+    assert all(i["rec_id"] for i in fb.history(con, cid)["items"])
+    assert all(row["company_id"] == cid for row in con.execute("SELECT company_id FROM recommendations WHERE rec_id IN (%s)" % ",".join("?" * len(fb.history(con, cid)["items"])), [i["rec_id"] for i in fb.history(con, cid)["items"]]))
+
+
+def test_next_rupee_is_company_and_policy_specific(con):
+    winners = {cid: svc.build_plan(con, cid)["next_rupee"] for cid in COMPANIES}
+    assert len({w["sku_id"] for w in winners.values()}) == 4          # a different product per company
+    p = svc.build_plan(con, "fashion")["portfolio"]
+    assert p[0]["eligible"] and p[0]["policy_value_per_rupee"] >= max(r["policy_value_per_rupee"] for r in p if r["eligible"])
+    assert [r["rank"] for r in p] == list(range(1, len(p) + 1))
+
+
+def test_whatif_can_change_next_rupee_winner(con):
+    res = svc.whatif(con, "fashion", {"sku_overrides": {"fashion-scarf": {"on_hand": 200}}})
+    assert res["baseline"]["next_rupee"]["sku_id"] == "fashion-scarf"
+    assert res["scenario"]["next_rupee"]["sku_id"] != "fashion-scarf"
+
+
+@pytest.mark.parametrize("cid", COMPANIES)
+def test_why_not_and_roas_trap(con, cid):
+    plan = svc.build_plan(con, cid)
+    win, trap = plan["next_rupee"], plan["roas_trap"]
+    assert win["why_won"] and len(win["alternatives"]) == 3
+    assert all(a["why_lost"] and a["campaign_id"] != win["campaign_id"] for a in win["alternatives"])
+    assert 0 <= win["health"]["score"] <= 100 and len(win["health"]["parts"]) == 6
+    assert len(plan["candidates"]) == len(plan["campaigns"])
+    leader = max(plan["candidates"], key=lambda x: x["roas"])
+    assert trap["active"] == (leader["campaign_id"] != win["campaign_id"])
+    if trap["active"]:                      # high ROAS did not win: winner has better marginal profit per rupee
+        assert win["policy_value_per_rupee"] >= leader["policy_value_per_rupee"]
