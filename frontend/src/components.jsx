@@ -52,6 +52,7 @@ export function RecCard({ rec, top, onDecided, expanded = true }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const [status, setStatus] = useState(rec.status)
+  const [more, setMore] = useState(expanded)
   const decide = async (approve) => {
     setBusy(true)
     try {
@@ -93,7 +94,8 @@ export function RecCard({ rec, top, onDecided, expanded = true }) {
       )}
       <div>
         <div className="muted small" style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>Why</div>
-        <ul className="why">{rec.why.map((w, i) => <li key={i}>{w}</li>)}</ul>
+        <ul className="why">{(more ? rec.why : rec.why.slice(0, 1)).map((w, i) => <li key={i}>{w}</li>)}</ul>
+        {!expanded && rec.why.length > 1 && <button className="link-btn" aria-expanded={more} onClick={() => setMore(!more)}>{more ? 'Show less' : `Show ${rec.why.length - 1} more reasons`}</button>}
       </div>
       {expanded && rec.policy_drivers?.length > 0 && (
         <div className="stack" style={{ gap: 8 }}>
@@ -143,7 +145,12 @@ export function Outcome({ r }) {
 }
 
 export function Loading({ error }) {
-  return error ? <div className="err">Couldn’t reach the API: {String(error.message || error)}. Is the backend running on :8000?</div> : <div className="loading">Crunching the numbers…</div>
+  if (error) return <div className="err" role="alert">Couldn’t reach the API: {String(error.message || error)}. Is the backend running on :8000?</div>
+  return (
+    <div className="skeleton" role="status" aria-label="Loading">
+      <i style={{ height: 190 }} /><div className="grid g-7-5"><i style={{ height: 220 }} /><i style={{ height: 220 }} /></div><i style={{ height: 260 }} />
+    </div>
+  )
 }
 
 export const KIND_TONE = {

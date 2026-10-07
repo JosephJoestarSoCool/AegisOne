@@ -180,7 +180,8 @@ def _why_won(w: dict, ru: dict | None, pol: Policy) -> list[str]:
     elif not ru:
         out.append(f"Only eligible opportunity: ₹{w['profit_per_rupee']:.2f} incremental profit per ₹1.")
     else:
-        out.append(f"Highest policy-weighted value per ₹1 ({w['policy_value_per_rupee']:.2f} vs {ru['policy_value_per_rupee']:.2f}).")
+        out.append(f"Highest policy-weighted value per ₹1: {w['policy_value_per_rupee']:.2f} vs {ru['policy_value_per_rupee']:.2f} "
+                   f"(growth, inventory and risk weights outweigh raw profit).")
     if ru and w["margin"] > ru["margin"]:
         out.append(f"Better contribution margin: {w['margin']*100:.0f}% vs {ru['margin']*100:.0f}%.")
     if ru and w["marginal_cac"] and ru["marginal_cac"] and w["marginal_cac"] < ru["marginal_cac"]:
@@ -197,6 +198,9 @@ def _why_lost(x: dict, w: dict) -> list[str]:
     out = []
     if x["gate_reason"]:
         out.append(f"Blocked by policy: {x['gate_reason']}.")
+    elif x["profit_per_rupee"] > w["profit_per_rupee"]:
+        out.append(f"Earns more profit per ₹1 (₹{x['profit_per_rupee']:.2f}) but lower policy-weighted value "
+                   f"({x['policy_value_per_rupee']:.2f} vs {w['policy_value_per_rupee']:.2f}).")
     if x["stockout_risk"] >= max(0.25, w["stockout_risk"] + 0.1):
         out.append(f"Inventory constrained: {x['inventory_days']:.0f} days of cover vs {x['lead_time']:.0f}-day lead time.")
     if x["anomaly"]:
@@ -259,10 +263,17 @@ def _portfolio(cprep: list[dict], pol: Policy, marg: dict, allocation: list[dict
     if win:
         others = [x for x in cands if x is not win]
         runner = next((x for x in others if x["eligible"]), None)
+        for x in others:
+            x["why_lost"] = _why_lost(x, win)
+        pl = max((x for x in cands if x["eligible"]), key=lambda x: x["profit_per_rupee"])
+        top_dims = ", ".join(DIM_LABEL[k].lower() for k, _ in sorted(pol.weights.items(), key=lambda kv: -kv[1])[:2])
+        policy_note = None if pl is win else (
+            f"{pl['sku_name']} × {pl['platform']} earns more raw profit per ₹1 (₹{pl['profit_per_rupee']:.2f}), but "
+            f"{pol.name} policy weights {top_dims} most, so {win['sku_name']} × {win['platform']} ranks first on policy-weighted value.")
         next_rupee = dict(
             next(r for r in rows if r["sku_id"] == win["sku_id"]), **win,
-            why_won=_why_won(win, runner, pol),
-            alternatives=[dict(x, why_lost=_why_lost(x, win)) for x in others[:3]],
+            policy_note=policy_note, why_won=_why_won(win, runner, pol),
+            alternatives=others[:3],
         )
         leader = max(cands, key=lambda x: x["roas"])
         if leader["campaign_id"] != win["campaign_id"]:

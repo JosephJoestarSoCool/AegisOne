@@ -1,36 +1,42 @@
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { compact, inr, pct, plus, useApi } from '../api'
+import { compact, inr, pct, useApi } from '../api'
+import { useState } from 'react'
 import { C, KIND_TONE, Kpi, Loading, RecCard, Tip, axis } from '../components'
+import { CandidateDrawer, Portfolio, TrapCard, Verdict, WhyNot } from '../decision'
+import { Drawer } from '../ui'
 
 export default function CommandCenter({ company, go }) {
   const { data, error, loading, reload } = useApi('/overview', { company_id: company })
+  const [sel, setSel] = useState(null)
+  const [review, setReview] = useState(false)
   if (!data) return <div className="page"><Loading error={error} /></div>
   const k = data.kpis, d = data.kpi_delta, rc = data.reconciliation
   const top = data.top_recommendations[0]
+  const w = data.next_rupee
   return (
     <div className="page">
-      <div className="card hero">
-        <div className="row between wrap" style={{ marginBottom: 14 }}>
-          <div>
-            <div className="muted small" style={{ fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase' }}>Where the next ₹1 should go</div>
-            <div className="big num" style={{ marginTop: 6 }}>
-              <span className="up">{plus(data.incremental_profit)}</span><span className="muted" style={{ fontSize: 16, fontWeight: 500 }}> / day identified</span>
-            </div>
-            <div className="muted">≈ {compact(data.incremental_profit_30d)} over 30 days at the <b style={{ color: 'var(--text)' }}>same total ad spend</b> — {data.top_recommendations.length > 0 ? 'top actions below' : 'no moves clear the guardrails'}.</div>
-          </div>
-          <div className="stack" style={{ gap: 6, textAlign: 'right' }}>
-            <span className="pill red">Platforms over-claim orders by {pct(rc.overcount_pct)}</span>
-            <span className="pill">Reported ROAS {rc.reported_roas.toFixed(2)} → reconciled <b className="gold">{rc.reconciled_roas.toFixed(2)}</b></span>
-          </div>
-        </div>
-        {top ? <RecCard rec={top} top onDecided={reload} expanded={false} /> : <div className="empty">Portfolio is already at its optimum under this policy.</div>}
+      <Verdict w={w} company={data.company.name} hasRec={!!top} onReview={() => setReview(true)} onOpen={setSel} />
+      <div className="grid g-7-5">
+        <WhyNot alts={w?.alternatives} onOpen={setSel} />
+        <TrapCard trap={data.roas_trap} candidates={data.candidates} />
       </div>
+      <Portfolio rows={data.candidates} winnerId={w?.campaign_id} onOpen={setSel} />
+      <Drawer open={review && !!top} onClose={() => setReview(false)} title="Recommended action" kicker="Review & approve">
+        {top && <RecCard rec={top} top onDecided={reload} expanded={false} />}
+      </Drawer>
+      <CandidateDrawer x={sel} winner={w} onClose={() => setSel(null)} />
 
       <div className="grid g4">
         <Kpi label="Revenue (7d)" value={compact(k.revenue)} delta={d.revenue} />
         <Kpi label="Ad spend (7d)" value={compact(k.spend)} delta={d.spend} invert />
         <Kpi label="Profit after ads (7d)" value={compact(k.profit)} delta={d.profit} />
         <Kpi label="ROAS · reconciled" value={k.roas.toFixed(2) + '×'} delta={d.roas} />
+      </div>
+
+      <div className="row wrap recon">
+        <span className="pill red">Platforms over-claim orders by {pct(rc.overcount_pct)}</span>
+        <span className="pill">Reported ROAS {rc.reported_roas.toFixed(2)} → reconciled <b className="gold">{rc.reconciled_roas.toFixed(2)}</b></span>
+        <span className="muted small">All figures use reconciled orders.</span>
       </div>
 
       <div className="grid g-7-5">
@@ -62,24 +68,6 @@ export default function CommandCenter({ company, go }) {
         </div>
       </div>
 
-      <div className="card">
-        <div className="row between"><h3>Top opportunities · policy-adjusted marginal return</h3><button className="btn ghost small" onClick={() => go('optimizer')}>Open optimizer →</button></div>
-        <table className="table">
-          <thead><tr><th>Campaign</th><th>Platform</th><th className="r">ROAS</th><th className="r">Marginal ROAS</th><th className="r">Budget</th><th style={{ width: 180 }}>Opportunity</th></tr></thead>
-          <tbody>
-            {data.opportunities.map((o) => (
-              <tr key={o.campaign_id}>
-                <td><b>{o.name}</b>{o.anomaly && <span className="pill red" style={{ marginLeft: 8 }}>{o.anomaly.replace(/_/g, ' ')}</span>}</td>
-                <td className="muted">{o.platform}</td>
-                <td className="r num">{o.roas.toFixed(2)}</td>
-                <td className="r num">{o.marginal_roas.toFixed(2)}</td>
-                <td className="r num">{inr(o.current)}</td>
-                <td><div className="row"><div className="bar" style={{ flex: 1 }}><i style={{ width: '100%', transform: `scaleX(${o.opportunity_score / 100})` }} /></div><b className="num">{o.opportunity_score}</b></div></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
       {loading && <span className="muted small">refreshing…</span>}
     </div>
   )

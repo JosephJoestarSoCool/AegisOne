@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { compact, inr, pct, plus, post, useApi } from '../api'
 import { C, Loading, Tip, axis } from '../components'
@@ -7,10 +7,11 @@ import { shortName } from './Optimizer'
 const DIMS = [['profitability', 'Profitability'], ['growth', 'Growth'], ['revenue', 'Revenue'], ['inventory', 'Inventory'], ['cac', 'CAC'], ['risk', 'Risk']]
 
 function Slider({ label, value, min, max, step, onChange, fmt }) {
+  const id = useId()
   return (
     <div className="slider">
-      <label><span>{label}</span><b className="num">{fmt ? fmt(value) : value}</b></label>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <label htmlFor={id}><span>{label}</span><b className="num">{fmt ? fmt(value) : value}</b></label>
+      <input id={id} type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
     </div>
   )
 }
@@ -91,8 +92,8 @@ export default function WhatIf({ company, preset }) {
           <div className="row between"><h3 style={{ margin: 0 }}>Change the business</h3><button className="btn ghost small" onClick={reset}>Reset</button></div>
           <Slider label="Total daily budget" value={budget} min={-40000} max={40000} step={1000} onChange={setBudget} fmt={(v) => (v > 0 ? '+' : '') + inr(v)} />
           <div className="stack" style={{ gap: 10, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
-            <div className="slider"><label><span>SKU</span></label>
-              <select value={sku} onChange={(e) => { setSku(e.target.value); setStock(null); setPriceP(0); setCostP(0) }}>
+            <div className="slider"><label htmlFor="whatif-sku"><span>SKU</span></label>
+              <select id="whatif-sku" value={sku} onChange={(e) => { setSku(e.target.value); setStock(null); setPriceP(0); setCostP(0) }}>
                 {skus.map((s) => <option key={s.sku_id} value={s.sku_id}>{s.sku_name}</option>)}
               </select></div>
             <Slider label={`Inventory on hand (now ${Math.round(cur.on_hand).toLocaleString('en-IN')})`} value={Math.round(stockVal)} min={0} max={Math.round(cur.on_hand * 1.5)} step={Math.max(1, Math.round(cur.on_hand / 100))} onChange={setStock} fmt={(v) => v.toLocaleString('en-IN') + ' units'} />

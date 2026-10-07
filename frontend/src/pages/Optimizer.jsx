@@ -36,7 +36,7 @@ export default function Optimizer({ company }) {
       <div>
         <div className="row between" style={{ marginBottom: 12 }}><h3 style={{ margin: 0 }}>Recommendations · ranked by expected incremental profit</h3><span className="muted small">{data.recommendations.length} actions</span></div>
         <div className="stack">
-          {data.recommendations.map((r, i) => <RecCard key={r.rec_id} rec={r} top={i === 0} onDecided={reload} />)}
+          {data.recommendations.map((r, i) => <RecCard key={r.rec_id} rec={r} top={i === 0} onDecided={reload} expanded={false} />)}
           {!data.recommendations.length && <div className="card empty">No move clears the guardrails under this policy.</div>}
         </div>
       </div>

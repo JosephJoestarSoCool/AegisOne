@@ -27,7 +27,7 @@ Synthetic / platform data → Ingestion & reconciliation → Unified business da
 | `backend/app/feedback.py` | Approve → simulated outcome → error → updated confidence |
 | `backend/app/demo.py` | The deterministic judge demo |
 | `backend/app/main.py` | FastAPI app |
-| `backend/tests/` | pytest suite (27 tests) |
+| `backend/tests/` | pytest suite (37 tests) |
 | `frontend/` | React + Vite + Recharts dashboard |
 
 ## Setup

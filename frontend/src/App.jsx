@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useApi } from './api'
+import BrandSwitcher from './BrandSwitcher'
+import Icon from './icons'
 import CommandCenter from './pages/CommandCenter'
 import Demo from './pages/Demo'
 import Diagnosis from './pages/Diagnosis'
@@ -9,13 +11,13 @@ import Profile from './pages/Profile'
 import WhatIf from './pages/WhatIf'
 
 const NAV = [
-  ['demo', 'Guided Demo', '▶'],
-  ['command', 'Command Center', '◎'],
-  ['diagnosis', 'AI Diagnosis', '✦'],
-  ['optimizer', 'Budget Optimizer', '⇄'],
-  ['profile', 'Company Profile', '◇'],
-  ['whatif', 'What-If Simulator', '⌁'],
-  ['history', 'Decision History', '↺'],
+  ['demo', 'Guided Demo', 'play'],
+  ['command', 'Command Center', 'command'],
+  ['diagnosis', 'AI Diagnosis', 'diagnosis'],
+  ['optimizer', 'Budget Optimizer', 'optimizer'],
+  ['profile', 'Company Profile', 'profile'],
+  ['whatif', 'What-If Simulator', 'whatif'],
+  ['history', 'Decision History', 'history'],
 ]
 const TITLES = {
   demo: ['Guided Demo', 'data → diagnosis → decision → what-if → feedback'],
@@ -32,9 +34,10 @@ export default function App() {
   const [company, setCompany] = useState('fashion')
   const [focus, setFocus] = useState(null)
   const [preset, setPreset] = useState(null)
+  const [nav, setNav] = useState(false)
   const comps = useApi('/companies')
   const diag = useApi('/overview', { company_id: company })
-  const go = (p, f = null, pre = null) => { setPage(p); setFocus(f); if (pre) setPreset(pre) }
+  const go = (p, f = null, pre = null) => { setNav(false); setPage(p); setFocus(f); if (pre) setPreset(pre) }
   const [title, sub] = TITLES[page]
   const view = {
     demo: <Demo go={go} setCompany={setCompany} />,
@@ -47,30 +50,28 @@ export default function App() {
   }[page]
   return (
     <div className="shell">
-      <aside className="side">
-        <div className="brand"><div className="brand-mark">₹</div><div><b>AegisOne</b><span>Autonomous Marketing CFO</span></div></div>
+      <a className="skip" href="#content">Skip to content</a>
+      <aside className={'side' + (nav ? ' open' : '')} id="sidebar" aria-label="Primary">
+        <BrandSwitcher companies={comps.data} value={company} onChange={(id) => { setCompany(id); setFocus(null); setNav(false) }} />
         {NAV.map(([k, label, icon], i) => (
           <div key={k}>
             {i === 1 && <div className="nav-sep" />}
             <button className="nav-btn" aria-current={page === k ? 'page' : undefined} onClick={() => go(k)}>
-              <span style={{ width: 18, textAlign: 'center' }}>{icon}</span>{label}
+              <Icon name={icon} />{label}
               {k === 'diagnosis' && diag.data && <span className="badge">{diag.data.anomaly_count}</span>}
             </button>
           </div>
         ))}
         <div className="side-foot">Synthetic data · no live ad accounts.<br />DataQuest 3.0</div>
       </aside>
+      {nav && <div className="side-scrim" onClick={() => setNav(false)} />}
       <main className="main">
         <header className="topbar">
+          <button className="icon-btn menu-btn" aria-label="Open navigation" aria-expanded={nav} aria-controls="sidebar" onClick={() => setNav(!nav)}><Icon name="menu" /></button>
           <div><h1>{title}</h1><div className="sub">{sub}</div></div>
           <div className="spacer" />
-          {page !== 'demo' && comps.data && (
-            <div className="seg" role="group" aria-label="Company">
-              {comps.data.map((c) => <button key={c.company_id} aria-pressed={company === c.company_id} onClick={() => { setCompany(c.company_id); setFocus(null) }}>{c.name}</button>)}
-            </div>
-          )}
         </header>
-        <div key={page + (page === 'demo' ? '' : company)}>{view}</div>
+        <div key={page + (page === 'demo' ? '' : company)} id="content">{view}</div>
       </main>
     </div>
   )
