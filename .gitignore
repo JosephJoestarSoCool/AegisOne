@@ -1,0 +1,31 @@
+# secrets / env
+.env
+.env.*
+*.pem
+*.key
+
+# python
+backend/.venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# generated data
+data/*.db
+data/*.db-journal
+data/csv/
+
+# node / build
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.log
+
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
