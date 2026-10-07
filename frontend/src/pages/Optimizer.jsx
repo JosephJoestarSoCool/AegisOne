@@ -1,8 +1,7 @@
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { compact, inr, plus, useApi } from '../api'
-import { C, Kpi, Loading, RecCard, Tip, axis } from '../components'
-
-export const shortName = (n) => n.replace(' · ', ' ').replace('Lookalike 1%', 'LAL').replace('Interest-based', 'Interest').replace('Retargeting 30d', 'RT').replace(' · ', ' ')
+import { Kpi, Loading, RecCard, Tip } from '../components'
+import { C, axis, shortName } from '../lib'
 
 export default function Optimizer({ company }) {
   const { data, error, reload } = useApi('/plan', { company_id: company })

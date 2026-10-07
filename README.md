@@ -57,6 +57,15 @@ cd backend
 .venv/Scripts/python -m pytest -q
 ```
 
+### Frontend tests (Playwright + axe)
+
+Uses the real backend and dev server (resets the demo DB first). Needs Google Chrome installed.
+
+```bash
+cd frontend
+npx playwright test        # brand switching, next-₹1, ROAS trap, why-not, what-if, approve→history, a11y, overflow
+```
+
 ### Rebuild the deck
 
 ```bash

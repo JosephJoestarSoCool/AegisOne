@@ -1,21 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import Icon from './icons'
+import { GLOSS } from './lib'
 
-/** Plain-language metric definitions, shown on hover, keyboard focus, or tap. */
-export const GLOSS = {
-  roas: 'Revenue generated per ₹1 of ad spend (average, all spend so far).',
-  mroas: 'Revenue from the next ₹1 of spend. Falls as a campaign saturates.',
-  ppr: 'Contribution profit from the next ₹1 after COGS and the ₹1 itself: marginal ROAS × margin − 1. This is what the engine ranks on.',
-  value: 'Incremental profit per ₹1 plus the company’s policy weights: growth, inventory pressure, CAC and risk.',
-  margin: 'Contribution margin per unit sold: (price − unit cost) ÷ price.',
-  cac: 'Marginal CAC: ad spend needed to win one more order at today’s budget.',
-  cvr: 'Share of clicks that become orders.',
-  inv: 'Days of stock left at the current sell-through rate.',
-  risk: 'Chance the SKU stocks out before replenishment, given lead time.',
-  conf: 'How much to trust this estimate: elasticity fit quality, stock safety and ROAS stability.',
-  health: 'Transparent 0–100 score blending profit, ROAS, conversion, inventory fit, creative freshness and stability.',
-  budget: 'Daily budget before and after the recommended move.',
-}
 
 export function Hint({ k, text, children, align }) {
   const id = useId()
@@ -114,5 +100,21 @@ export function Bars({ items }) {
         </div>
       ))}
     </div>
+  )
+}
+
+/** Collapsible section: clean by default, detail on demand. */
+export function Disclosure({ title, summary, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const id = useId()
+  return (
+    <section className={'disc' + (open ? ' open' : '')}>
+      <button type="button" className="disc-head" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
+        <span className="disc-title">{title}</span>
+        {summary && !open && <span className="muted small disc-sum">{summary}</span>}
+        <Icon name="chevron" size={16} className="caret" />
+      </button>
+      {open && <div className="disc-body" id={id}>{children}</div>}
+    </section>
   )
 }

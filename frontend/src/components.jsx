@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { inr, pct, plus, post } from './api'
+import { C, TYPE_LABEL } from './lib'
 
-export const C = { gold: '#f5b03a', teal: '#2dd4bf', red: '#f87171', blue: '#60a5fa', violet: '#a78bfa', muted: '#8f9db8', line: '#26334f', card2: '#1a253d' }
-export const axis = { stroke: C.muted, fontSize: 11, tickLine: false, axisLine: { stroke: C.line } }
 
 export function Kpi({ label, value, delta, invert }) {
   const good = invert ? delta < 0 : delta > 0
@@ -41,10 +40,6 @@ export function Tip({ active, payload, label, fmt = (v) => v }) {
   )
 }
 
-export const TYPE_LABEL = {
-  move_budget: 'Move budget', increase_budget: 'Increase budget', decrease_budget: 'Decrease budget',
-  pause_campaign: 'Pause campaign', replace_creative: 'Replace creative',
-}
 const TYPE_TONE = { move_budget: 'gold', increase_budget: 'teal', decrease_budget: 'red', pause_campaign: 'red', replace_creative: 'violet' }
 
 /** Full recommendation card: flow, why, policy drivers, guardrails, approve/reject → feedback. */
@@ -153,7 +148,3 @@ export function Loading({ error }) {
   )
 }
 
-export const KIND_TONE = {
-  creative_fatigue: 'violet', auction_pressure: 'blue', competitor_price_pressure: 'gold', post_click_issue: 'red',
-  margin_squeeze: 'red', stockout_risk: 'red', overstock_risk: 'gold',
-}

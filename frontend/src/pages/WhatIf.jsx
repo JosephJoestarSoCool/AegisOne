@@ -1,10 +1,14 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { compact, inr, pct, plus, post, useApi } from '../api'
-import { C, Loading, Tip, axis } from '../components'
-import { shortName } from './Optimizer'
+import Icon from '../icons'
+import { Disclosure, Hint } from '../ui'
+import { Loading, Tip } from '../components'
+import { C, axis, shortName } from '../lib'
 
 const DIMS = [['profitability', 'Profitability'], ['growth', 'Growth'], ['revenue', 'Revenue'], ['inventory', 'Inventory'], ['cac', 'CAC'], ['risk', 'Risk']]
+const fx = (n) => '₹' + n.toFixed(2)
+const nameOf = (x) => `${x.sku_name} × ${x.platform}`
 
 function Slider({ label, value, min, max, step, onChange, fmt }) {
   const id = useId()
@@ -18,159 +22,175 @@ function Slider({ label, value, min, max, step, onChange, fmt }) {
 
 export default function WhatIf({ company, preset }) {
   const plan = useApi('/plan', { company_id: company })
+  if (!plan.data) return <div className="page"><Loading error={plan.error} /></div>
+  return <Simulator plan={plan.data} company={company} preset={preset} />
+}
+
+function Simulator({ plan, company, preset }) {
+  const pol = plan.policy
+  const skus = useMemo(() => {
+    const m = new Map()
+    Object.values(plan.campaigns).forEach((c) => m.set(c.sku_id, c))
+    return [...m.values()]
+  }, [plan])
   const [budget, setBudget] = useState(0)
-  const [sku, setSku] = useState('')
-  const [stock, setStock] = useState(null)
+  const [sku, setSku] = useState(skus.some((s) => s.sku_id === preset?.sku) ? preset.sku : (plan.next_rupee?.sku_id ?? skus[0].sku_id))
+  const [stock, setStock] = useState(skus.some((s) => s.sku_id === preset?.sku) ? preset.on_hand : null)
   const [priceP, setPriceP] = useState(0)
   const [costP, setCostP] = useState(0)
-  const [weights, setWeights] = useState(null)
-  const [minRoas, setMinRoas] = useState(null)
-  const [minMargin, setMinMargin] = useState(null)
-  const [res, setRes] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const seq = useRef(0)
+  const [weights, setWeights] = useState({ ...pol.weights })
+  const [minRoas, setMinRoas] = useState(pol.min_roas)
+  const [minMargin, setMinMargin] = useState(pol.min_margin)
+  const [maxCac, setMaxCac] = useState(pol.max_cac)
+  const [out, setOut] = useState(null)   // { key, data?, error? } for the scenario it answers
 
-  const skus = useMemo(() => {
-    if (!plan.data) return []
-    const m = new Map()
-    Object.values(plan.data.campaigns).forEach((c) => m.set(c.sku_id, c))
-    return [...m.values()]
-  }, [plan.data])
-
-  useEffect(() => {  // reset when company changes
-    setBudget(0); setPriceP(0); setCostP(0); setSku(''); setStock(null); setWeights(null); setMinRoas(null); setMinMargin(null); setRes(null)
-  }, [company])
-  useEffect(() => {  // preset from the guided demo
-    if (preset && skus.length) { setSku(preset.sku); setStock(preset.on_hand) }
-  }, [preset, skus])
-  useEffect(() => {
-    if (!plan.data) return
-    setWeights((w) => w || { ...plan.data.policy.weights })
-    setMinRoas((v) => v ?? plan.data.policy.min_roas)
-    setMinMargin((v) => v ?? plan.data.policy.min_margin)
-    if (skus[0]) setSku((cur) => cur || skus[0].sku_id)
-  }, [plan.data, skus])
-
-  const cur = skus.find((s) => s.sku_id === sku)
+  const cur = skus.find((s) => s.sku_id === sku) ?? skus[0]
   const scenario = useMemo(() => {
-    if (!plan.data || !cur || !weights) return null
     const ov = {}
     if (stock !== null && Math.round(stock) !== Math.round(cur.on_hand)) ov.on_hand = stock
     if (priceP) ov.price = cur.price * (1 + priceP / 100)
     if (costP) ov.unit_cost = cur.unit_cost * (1 + costP / 100)
-    const p = plan.data.policy
     return {
       total_budget_delta: budget,
-      sku_overrides: Object.keys(ov).length ? { [sku]: ov } : {},
+      sku_overrides: Object.keys(ov).length ? { [cur.sku_id]: ov } : {},
       weights,
-      constraints: { min_roas: minRoas, min_margin: minMargin },
-      _w: p.weights,
+      constraints: { min_roas: minRoas, min_margin: minMargin, max_cac: maxCac },
     }
-  }, [plan.data, cur, weights, stock, priceP, costP, budget, sku, minRoas, minMargin])
+  }, [cur, stock, priceP, costP, budget, weights, minRoas, minMargin, maxCac])
+  const key = JSON.stringify(scenario)
 
   useEffect(() => {
-    if (!scenario) return
-    const n = ++seq.current
-    setBusy(true)
-    const { _w, ...sc } = scenario
+    let dead = false
     const t = setTimeout(() => {
-      post('/whatif', { company_id: company, scenario: sc }).then((r) => { if (n === seq.current) { setRes(r); setBusy(false) } }).catch(() => setBusy(false))
+      post('/whatif', { company_id: company, scenario: JSON.parse(key) })
+        .then((data) => !dead && setOut({ key, data }))
+        .catch((error) => !dead && setOut({ key, error }))
     }, 160)
-    return () => clearTimeout(t)
-  }, [scenario, company])
+    return () => { dead = true; clearTimeout(t) }
+  }, [key, company])
 
-  if (!plan.data || !weights || !cur) return <div className="page"><Loading error={plan.error} /></div>
+  const busy = !out || out.key !== key
   const stockVal = stock ?? cur.on_hand
-  const reset = () => { setBudget(0); setPriceP(0); setCostP(0); setStock(null); setWeights({ ...plan.data.policy.weights }); setMinRoas(plan.data.policy.min_roas); setMinMargin(plan.data.policy.min_margin) }
+  const reset = () => {
+    setBudget(0); setPriceP(0); setCostP(0); setStock(null); setWeights({ ...pol.weights })
+    setMinRoas(pol.min_roas); setMinMargin(pol.min_margin); setMaxCac(pol.max_cac)
+  }
   const setW = (k, v) => setWeights((w) => ({ ...w, [k]: v }))
   const wsum = Object.values(weights).reduce((a, b) => a + b, 0) || 1
 
   return (
     <div className="page">
       <div className="grid g-4-8" style={{ alignItems: 'start' }}>
-        <div className="card stack" style={{ position: 'sticky', top: 80 }}>
+        <div className="card stack controls">
           <div className="row between"><h3 style={{ margin: 0 }}>Change the business</h3><button className="btn ghost small" onClick={reset}>Reset</button></div>
           <Slider label="Total daily budget" value={budget} min={-40000} max={40000} step={1000} onChange={setBudget} fmt={(v) => (v > 0 ? '+' : '') + inr(v)} />
-          <div className="stack" style={{ gap: 10, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
-            <div className="slider"><label htmlFor="whatif-sku"><span>SKU</span></label>
-              <select id="whatif-sku" value={sku} onChange={(e) => { setSku(e.target.value); setStock(null); setPriceP(0); setCostP(0) }}>
+          <div className="stack ctl-group">
+            <div className="slider"><label htmlFor="whatif-sku"><span>Product</span></label>
+              <select id="whatif-sku" value={cur.sku_id} onChange={(e) => { setSku(e.target.value); setStock(null); setPriceP(0); setCostP(0) }}>
                 {skus.map((s) => <option key={s.sku_id} value={s.sku_id}>{s.sku_name}</option>)}
               </select></div>
-            <Slider label={`Inventory on hand (now ${Math.round(cur.on_hand).toLocaleString('en-IN')})`} value={Math.round(stockVal)} min={0} max={Math.round(cur.on_hand * 1.5)} step={Math.max(1, Math.round(cur.on_hand / 100))} onChange={setStock} fmt={(v) => v.toLocaleString('en-IN') + ' units'} />
+            <Slider label={`Inventory (now ${Math.round(cur.on_hand).toLocaleString('en-IN')})`} value={Math.round(stockVal)} min={0} max={Math.round(cur.on_hand * 1.5)} step={Math.max(1, Math.round(cur.on_hand / 100))} onChange={setStock} fmt={(v) => v.toLocaleString('en-IN') + ' units'} />
             <Slider label={`Price (now ${inr(cur.price)})`} value={priceP} min={-30} max={30} step={1} onChange={setPriceP} fmt={(v) => (v > 0 ? '+' : '') + v + '%'} />
             <Slider label={`Unit cost → margin (now ${pct(cur.margin)})`} value={costP} min={-20} max={40} step={1} onChange={setCostP} fmt={(v) => (v > 0 ? '+' : '') + v + '%'} />
           </div>
-          <div className="stack" style={{ gap: 10, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
-            <div className="muted small" style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' }}>Company priorities</div>
-            {DIMS.map(([k, l]) => <Slider key={k} label={l} value={Math.round(weights[k] * 100)} min={0} max={60} step={1} onChange={(v) => setW(k, v / 100)} fmt={(v) => pct(v / 100 / wsum)} />)}
-          </div>
-          <div className="stack" style={{ gap: 10, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
-            <div className="muted small" style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' }}>Guardrails</div>
-            <Slider label="Minimum ROAS" value={minRoas} min={1} max={10} step={0.5} onChange={setMinRoas} fmt={(v) => v.toFixed(1) + '×'} />
-            <Slider label="Minimum margin" value={minMargin} min={0.05} max={0.7} step={0.01} onChange={setMinMargin} fmt={(v) => pct(v)} />
-          </div>
+          <Disclosure title="Company priorities" summary="objective weights">
+            <div className="stack" style={{ gap: 10 }}>
+              {DIMS.map(([k, l]) => <Slider key={k} label={l} value={Math.round(weights[k] * 100)} min={0} max={60} step={1} onChange={(v) => setW(k, v / 100)} fmt={(v) => pct(v / 100 / wsum)} />)}
+            </div>
+          </Disclosure>
+          <Disclosure title="Guardrails" summary="ROAS, margin, CAC">
+            <div className="stack" style={{ gap: 10 }}>
+              <Slider label="Minimum ROAS" value={minRoas} min={1} max={10} step={0.5} onChange={setMinRoas} fmt={(v) => v.toFixed(1) + '×'} />
+              <Slider label="Minimum margin" value={minMargin} min={0.05} max={0.7} step={0.01} onChange={setMinMargin} fmt={(v) => pct(v)} />
+              <Slider label="Maximum CAC" value={maxCac} min={Math.round(pol.max_cac * 0.3)} max={Math.round(pol.max_cac * 2)} step={Math.max(1, Math.round(pol.max_cac / 50))} onChange={setMaxCac} fmt={(v) => inr(v)} />
+            </div>
+          </Disclosure>
         </div>
 
-        <div className="stack" style={{ opacity: busy ? 0.7 : 1, transition: 'opacity 150ms var(--ease-out)' }}>
-          {!res ? <div className="loading">Solving…</div> : <Result res={res} />}
+        <div className="stack results" aria-live="polite" aria-busy={busy}>
+          <div className={'solving' + (busy ? ' on' : '')} role="status">{busy ? <span className="sr-only">Re-solving the decision</span> : null}<i /></div>
+          {out?.error && <div className="err" role="alert">Couldn’t solve this scenario: {String(out.error.message || out.error)}</div>}
+          {!out && <Loading />}
+          {out?.data && <div className={'stack fade' + (busy ? ' stale' : '')}><Result res={out.data} /></div>}
         </div>
       </div>
     </div>
   )
 }
 
-function TopCard({ title, tone, r }) {
+function WinnerCard({ label, w, tone, other }) {
+  if (!w) return <div className="card wcard"><div className="eyebrow">{label}</div><p className="muted">No campaign clears the guardrails.</p></div>
+  const d = other ? w.profit_per_rupee - other.profit_per_rupee : 0
   return (
-    <div className="card" style={tone === 'new' ? { borderColor: 'var(--gold)' } : undefined}>
-      <h3>{title}</h3>
-      {r ? (<div className="stack" style={{ gap: 8 }}>
-        <div style={{ fontWeight: 650, fontSize: 15 }}>{r.title}</div>
-        <div className="row"><b className="up num" style={{ fontSize: 20 }}>{plus(r.expected_profit)}/day</b><span className="muted small">confidence {pct(r.confidence)}</span></div>
-      </div>) : <div className="muted">No budget move clears the guardrails.</div>}
+    <div className={'card wcard ' + (tone || '')}>
+      <div className="eyebrow">{label}</div>
+      <h3 className="wname">{w.sku_name}<span> × {w.platform}</span></h3>
+      <div className="muted small">{w.campaign}</div>
+      <div className="wnum">
+        <Hint k="ppr" align="left"><span className="eyebrow">Profit / ₹1</span></Hint>
+        <b className="num up">{fx(w.profit_per_rupee)}</b>
+        {other && Math.abs(d) >= 0.005 && <span className={'num small ' + (d > 0 ? 'up' : 'down')}>{d > 0 ? '+' : '−'}{fx(Math.abs(d))} vs baseline</span>}
+      </div>
+      <div className="wmeta small">
+        <span><span className="muted">Allocation</span> <b className="num">{inr(w.current)} → {inr(w.recommended)}</b></span>
+        <span><span className="muted">Expected</span> <b className="num up">{plus(w.recommended_profit)}/day</b></span>
+        <span><Hint k="conf" align="left"><span className="muted">Confidence</span></Hint> <b className="num">{pct(w.confidence)}</b></span>
+      </div>
     </div>
   )
 }
 
 function Result({ res }) {
+  const nr = res.next_rupee
   const chart = res.allocation_diff.map((a) => ({ name: shortName(a.name), Baseline: a.baseline, Scenario: a.scenario }))
   const t = res.scenario.totals
+  const sameCampaign = nr.before && nr.after && !nr.changed
+  const dp = nr.before && nr.after ? nr.after.profit_per_rupee - nr.before.profit_per_rupee : 0
   return (
     <>
-      <div className={'banner ' + (res.changed ? 'changed' : '')}>
-        <div className="row" style={{ marginBottom: 6 }}><span className={'pill ' + (res.changed ? 'gold' : '')}>{res.changed ? 'Recommendation changed' : 'Recommendation unchanged'}</span></div>
-        {res.narrative}
-      </div>
-      <div className="grid g2">
-        <TopCard title="Baseline top move" r={res.top_before} />
-        <TopCard title="Scenario top move" r={res.top_after} tone={res.changed ? 'new' : ''} />
+      <section className="cmp" aria-label="Next ₹1 before and after">
+        <WinnerCard label="Baseline" w={nr.before} />
+        <Icon name="arrow" size={22} className="cmp-arrow" />
+        <div key={nr.after?.campaign_id} className="rise-in"><WinnerCard label="Simulated" w={nr.after} tone={nr.changed ? 'changed' : ''} other={nr.before} /></div>
+      </section>
+      <div className={'banner ' + (nr.changed ? 'changed' : '')}>
+        <div className="row" style={{ marginBottom: 6 }}>
+          <span className={'pill ' + (nr.changed ? 'gold' : '')}>{nr.changed ? 'Winner changed' : 'Winner unchanged'}</span>
+        </div>
+        {nr.changed && nr.before && nr.after && <p style={{ margin: 0 }}>The next ₹1 moves from <b>{nameOf(nr.before)}</b> to <b>{nameOf(nr.after)}</b>{nr.reason ? <>, because {nameOf(nr.before)} is now {nr.reason.replace(/\.$/, '').replace(/^Blocked by policy: /, 'blocked: ').replace(/^./, (c) => c.toLowerCase())}</> : null}.</p>}
+        {nr.changed && !nr.after && <p style={{ margin: 0 }}>No campaign clears the guardrails under this scenario, so the engine holds budget.</p>}
+        {sameCampaign && <p style={{ margin: 0 }}><b>{nameOf(nr.after)}</b> still wins the next ₹1. Profit per ₹1 {Math.abs(dp) < 0.005 ? 'is unchanged' : `${dp > 0 ? 'rises' : 'falls'} from ${fx(nr.before.profit_per_rupee)} to ${fx(nr.after.profit_per_rupee)}`}.</p>}
       </div>
       <div className="grid g3">
         <div className="card kpi"><div className="label">Scenario profit gain</div><div className="value up num">{plus(t.incremental_profit)}</div><div className="muted small">per day · {compact(t.incremental_profit_30d)} / 30d</div></div>
         <div className="card kpi"><div className="label">vs baseline</div><div className={'value num ' + (res.profit_delta >= 0 ? 'up' : 'down')}>{plus(res.profit_delta)}</div><div className="muted small">per day</div></div>
         <div className="card kpi"><div className="label">Total budget</div><div className="value num">{inr(t.budget_after)}</div><div className="muted small">{t.budget_after === t.budget_before ? 'unchanged' : plus(t.budget_after - t.budget_before) + ' vs today'}</div></div>
       </div>
-      <div className="card">
-        <h3>Allocation · baseline plan vs scenario plan</h3>
-        <ResponsiveContainer width="100%" height={Math.max(300, chart.length * 32)}>
-          <BarChart data={chart} layout="vertical" margin={{ left: 16, right: 16 }} barCategoryGap={6}>
-            <CartesianGrid stroke={C.line} horizontal={false} />
-            <XAxis type="number" {...axis} tickFormatter={compact} />
-            <YAxis type="category" dataKey="name" {...axis} width={170} />
-            <Tooltip content={<Tip fmt={(v) => inr(v)} />} cursor={{ fill: 'rgba(255,255,255,.04)' }} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="Baseline" fill="#3a4a6d" radius={3} isAnimationActive={false} />
-            <Bar dataKey="Scenario" fill={C.gold} radius={3} isAnimationActive={false} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="card">
-        <h3>Scenario recommendations</h3>
-        <table className="table"><tbody>
-          {res.scenario.recommendations.slice(0, 6).map((r) => (
-            <tr key={r.rec_id}><td>{r.title}</td><td className="r up num">{plus(r.expected_profit)}/day</td><td className="r muted num">{pct(r.confidence)}</td></tr>
-          ))}
-          {!res.scenario.recommendations.length && <tr><td className="muted">None.</td></tr>}
-        </tbody></table>
+      <div className="card disc-card">
+        <Disclosure title="Budget moves" summary={res.narrative.slice(0, 80) + (res.narrative.length > 80 ? '…' : '')}>
+          <p className="muted" style={{ marginTop: 0 }}>{res.narrative}</p>
+          <table className="table"><tbody>
+            {res.scenario.recommendations.slice(0, 6).map((r) => (
+              <tr key={r.rec_id}><td>{r.title}</td><td className="r up num">{plus(r.expected_profit)}/day</td><td className="r muted num">{pct(r.confidence)}</td></tr>
+            ))}
+            {!res.scenario.recommendations.length && <tr><td className="muted">None.</td></tr>}
+          </tbody></table>
+        </Disclosure>
+        <Disclosure title="Allocation · baseline vs scenario" summary={`${chart.length} campaigns`}>
+          <div role="img" aria-label="Bar chart comparing baseline and scenario daily budget for each campaign">
+            <ResponsiveContainer width="100%" height={Math.max(300, chart.length * 32)}>
+              <BarChart data={chart} layout="vertical" margin={{ left: 16, right: 16 }} barCategoryGap={6}>
+                <CartesianGrid stroke={C.line} horizontal={false} />
+                <XAxis type="number" {...axis} tickFormatter={compact} />
+                <YAxis type="category" dataKey="name" {...axis} width={170} />
+                <Tooltip content={<Tip fmt={(v) => inr(v)} />} cursor={{ fill: 'rgba(255,255,255,.04)' }} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="Baseline" fill="#3a4a6d" radius={3} isAnimationActive={false} />
+                <Bar dataKey="Scenario" fill={C.gold} radius={3} isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Disclosure>
       </div>
     </>
   )

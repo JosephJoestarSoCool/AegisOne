@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { inr, pct, plus, post, useApi } from '../api'
-import { C, Loading, Ring, Tip, axis } from '../components'
+import { Loading, Ring, Tip } from '../components'
+import { C, axis } from '../lib'
 
 const STEPS = ['Data', 'Diagnosis', 'Decision', 'What-if', 'Feedback']
 
@@ -120,7 +121,7 @@ export default function Demo({ go, setCompany }) {
             <div className="card"><h3>Before the inventory change</h3><div style={{ fontWeight: 650, fontSize: 16 }}>{w.top_before.title}</div><b className="up num" style={{ fontSize: 22 }}>{plus(w.top_before.expected_profit)}/day</b></div>
             <div className="card" style={{ borderColor: 'var(--gold)' }}><h3>After — decision re-solved</h3><div style={{ fontWeight: 650, fontSize: 16 }}>{w.top_after.title}</div><b className="gold num" style={{ fontSize: 22 }}>{plus(w.top_after.expected_profit)}/day</b></div>
           </div>
-          <div className="row"><button className="btn teal" onClick={() => { go('whatif', null, { sku: data.target_sku, on_hand: w.stock_units }) }}>Open in simulator and play with it →</button></div>
+          <div className="row"><button className="btn teal" onClick={() => { setCompany('fashion'); go('whatif', null, { sku: data.target_sku, on_hand: w.stock_units }) }}>Open in simulator and play with it →</button></div>
         </div>
       )}
 
@@ -141,7 +142,7 @@ export default function Demo({ go, setCompany }) {
                 <Row l="Confidence" v={`${pct(outcome.confidence_before)} → ${pct(outcome.confidence_after)}`} tone="gold" />
                 <Row l="Type calibration" v={`${pct(outcome.calibration_accuracy)} accuracy · n=${outcome.calibration_n}`} />
                 <div className="muted small">Future “{outcome.rec_type.replace(/_/g, ' ')}” recommendations now inherit this calibration.</div>
-                <button className="btn ghost" onClick={() => go('history')}>See decision history →</button>
+                <button className="btn ghost" onClick={() => { setCompany('fashion'); go('history') }}>See decision history →</button>
               </>
             ) : <div className="muted">Approve to see the outcome.</div>}
           </div>

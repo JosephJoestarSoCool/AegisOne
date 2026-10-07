@@ -16,7 +16,7 @@ def demo(con) -> dict:
     decision = next(r for r in plan["recommendations"] if r["rec_type"] == "move_budget"
                     and r["source_campaign_id"] == DEMO_CAMPAIGN)
     scenario = {"sku_overrides": {DEMO_TARGET_SKU: {"on_hand": DEMO_STOCK_UNITS}}}
-    wi = svc.whatif(con, DEMO_COMPANY, scenario)
+    wi = svc.whatif(con, DEMO_COMPANY, scenario, base=plan)
     sku = plan["campaigns"][decision["target_campaign_id"]]
     return dict(
         company_id=DEMO_COMPANY, campaign_id=DEMO_CAMPAIGN, target_sku=DEMO_TARGET_SKU,

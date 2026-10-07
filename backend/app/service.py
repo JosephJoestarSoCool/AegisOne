@@ -131,7 +131,7 @@ def _gate_reason(c: dict, pol: Policy, units_by_sku: dict) -> str | None:
     if (c["b0"] + 1000.0) / t["orders"] > pol.max_cac:
         return f"CAC above {inr(pol.max_cac)} cap"
     if units_by_sku[c["sku_id"]] >= c["cap_units"]:
-        return "stock cap reached"
+        return f"stock cap reached ({c['inventory_days']:.0f} days of cover vs {c['lead_time']:.0f}-day lead time)"
     return None
 
 
@@ -531,8 +531,8 @@ def _summ(rec: dict | None) -> dict | None:
                 target_id=rec["target_campaign_id"], expected_profit=rec["expected_profit"], confidence=rec["confidence"])
 
 
-def whatif(con, company_id: str, scenario: dict, policy_id: str | None = None) -> dict:
-    base = build_plan(con, company_id, policy_id)
+def whatif(con, company_id: str, scenario: dict, policy_id: str | None = None, base: dict | None = None) -> dict:
+    base = base or build_plan(con, company_id, policy_id)
     scen = build_plan(con, company_id, policy_id, scenario)
     key = lambda r: (r["rec_type"], r["source_campaign_id"], r["target_campaign_id"])
     bkeys = {key(r) for r in base["recommendations"][:3]}
@@ -546,7 +546,14 @@ def whatif(con, company_id: str, scenario: dict, policy_id: str | None = None) -
     diff = [dict(campaign_id=a["campaign_id"], name=a["name"], platform=a["platform"], current=a["current"],
                  baseline=ba[a["campaign_id"]]["recommended"], scenario=a["recommended"],
                  shift=a["recommended"] - ba[a["campaign_id"]]["recommended"]) for a in scen["allocation"]]
+    bw, sw = base["next_rupee"], scen["next_rupee"]
+    winner_changed = (bw["campaign_id"] if bw else None) != (sw["campaign_id"] if sw else None)
+    reason = None
+    if winner_changed and bw:
+        lost = next((c for c in scen["candidates"] if c["campaign_id"] == bw["campaign_id"]), None)
+        reason = (lost.get("why_lost") or [None])[0] if lost else None
     return dict(
+        next_rupee=dict(before=bw, after=sw, changed=winner_changed, reason=reason),
         baseline=base, scenario=scen, changed=changed, top_before=_summ(btop), top_after=_summ(stop),
         profit_delta=scen["totals"]["incremental_profit"] - base["totals"]["incremental_profit"],
         allocation_diff=diff, same_top3=bkeys == skeys,

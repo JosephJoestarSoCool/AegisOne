@@ -169,3 +169,13 @@ def test_why_not_and_roas_trap(con, cid):
     assert trap["active"] == (leader["campaign_id"] != win["campaign_id"])
     if trap["active"]:                      # high ROAS did not win: winner has better marginal profit per rupee
         assert win["policy_value_per_rupee"] >= leader["policy_value_per_rupee"]
+
+
+def test_whatif_reports_next_rupee_change_with_reason(con):
+    res = svc.whatif(con, "fashion", {"sku_overrides": {"fashion-scarf": {"on_hand": 200}}})
+    nr = res["next_rupee"]
+    assert nr["changed"] and nr["before"]["sku_id"] == "fashion-scarf" and nr["after"]["sku_id"] != "fashion-scarf"
+    assert nr["reason"]                                   # computed from the engine, never hard-coded
+    same = svc.whatif(con, "fashion", {})
+    assert not same["next_rupee"]["changed"] and same["next_rupee"]["reason"] is None
+    assert same["next_rupee"]["before"]["profit_per_rupee"] == same["next_rupee"]["after"]["profit_per_rupee"]

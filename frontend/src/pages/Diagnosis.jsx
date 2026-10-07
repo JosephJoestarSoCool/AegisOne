@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { inr, pct, useApi } from '../api'
-import { C, KIND_TONE, Loading, Ring, Tip, TYPE_LABEL, axis } from '../components'
+import { Loading, Ring, Tip } from '../components'
+import { C, KIND_TONE, TYPE_LABEL, axis } from '../lib'
 
 function Series({ company, campaignId }) {
   const { data } = useApi('/campaign-series', { company_id: company, campaign_id: campaignId })
@@ -33,8 +34,7 @@ function Series({ company, campaignId }) {
 
 export default function Diagnosis({ company, focus, go }) {
   const { data, error } = useApi('/diagnosis', { company_id: company })
-  const [sel, setSel] = useState(null)
-  useEffect(() => { setSel(focus || null) }, [focus, company])
+  const [sel, setSel] = useState(focus || null)   // page remounts per company/navigation, so focus seeds state
   if (!data) return <div className="page"><Loading error={error} /></div>
   const list = data.anomalies
   const a = list.find((x) => x.anomaly_id === sel) || list[0]
@@ -47,7 +47,7 @@ export default function Diagnosis({ company, focus, go }) {
           <h3 style={{ padding: '8px 10px 0' }}>Detected · {list.length}</h3>
           <div className="stack" style={{ gap: 2 }}>
             {list.map((x) => (
-              <button key={x.anomaly_id} className="list-item" aria-selected={x.anomaly_id === a.anomaly_id} onClick={() => setSel(x.anomaly_id)}>
+              <button key={x.anomaly_id} className="list-item" aria-current={x.anomaly_id === a.anomaly_id ? 'true' : undefined} onClick={() => setSel(x.anomaly_id)}>
                 <div className="row between"><b style={{ fontSize: 13 }}>{x.title}</b><span className="sev"><i style={{ width: x.severity * 100 + '%' }} /></span></div>
                 <div className="row"><span className={'pill ' + (KIND_TONE[x.kind] || '')}>{x.kind.replace(/_/g, ' ')}</span><span className="muted small num">{pct(x.confidence)}</span></div>
               </button>
@@ -84,13 +84,13 @@ export default function Diagnosis({ company, focus, go }) {
             </div>
             <div className="card">
               <h3>Evidence</h3>
-              <table className="table">
+              <div className="tscroll" tabIndex={0} role="region" aria-label="Evidence table, scrollable"><table className="table">
                 <thead><tr><th>Metric</th><th className="r">Baseline</th><th className="r">Now</th><th className="r">Δ</th></tr></thead>
                 <tbody>{a.evidence.map((e) => (
                   <tr key={e.label}><td>{e.label}</td><td className="r num muted">{e.baseline}</td><td className="r num">{e.current}</td>
                     <td className={'r num ' + (e.change_pct === 0 ? 'muted' : Math.abs(e.change_pct) < 12 ? 'muted' : 'down')}>{e.change_pct ? (e.change_pct > 0 ? '+' : '') + e.change_pct + '%' : '—'}</td></tr>
                 ))}</tbody>
-              </table>
+              </table></div>
             </div>
           </div>
 

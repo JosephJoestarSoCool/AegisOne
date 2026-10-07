@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { inr, pct, plus } from './api'
 import Icon from './icons'
+import { nameOf } from './lib'
 import { Bars, Drawer, Health, Hint, Metric, Section } from './ui'
 
 const ACTION = { increase: 'Increase', decrease: 'Decrease', hold: 'Hold', pause: 'Pause' }
 const fx = (n, d = 2) => '₹' + n.toFixed(d)
-export const nameOf = (x) => `${x.sku_name} × ${x.platform}`
 
 /** The answer: where the next ₹1 goes. Everything else on the page is evidence for this. */
 export function Verdict({ w, company, onReview, onOpen, hasRec }) {
@@ -149,7 +149,7 @@ export function Portfolio({ rows, winnerId, onOpen }) {
         <h3 id="pf-h" style={{ margin: 0 }}>Opportunity ranking · product × campaign × platform</h3>
         <span className="muted small">{rows.length} candidates · ranked by policy-weighted value per ₹1</span>
       </div>
-      <div className="tscroll">
+      <div className="tscroll" tabIndex={0} role="region" aria-label="Opportunity ranking table, scrollable">
         <table className="table ptable">
           <thead><tr><th style={{ width: 28 }}>#</th><th>Product · platform</th><th className="r"><Hint k="ppr" align="right"><span>Profit / ₹1</span></Hint></th><th className="hide-sm">Action</th><th className="hide-sm"><Hint k="health"><span>Health</span></Hint></th><th /></tr></thead>
           <tbody>{shown.map((x) => <Row key={x.campaign_id} x={x} win={x.campaign_id === winnerId} onOpen={onOpen} />)}</tbody>

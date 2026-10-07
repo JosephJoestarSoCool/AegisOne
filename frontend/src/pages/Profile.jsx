@@ -1,15 +1,16 @@
 import { PolarAngleAxis, PolarGrid, Radar, RadarChart, ResponsiveContainer } from 'recharts'
 import { inr, pct, useApi } from '../api'
-import { C, Loading } from '../components'
+import { Loading } from '../components'
+import { C } from '../lib'
 
 const DIMS = [['profitability', 'Profit'], ['growth', 'Growth'], ['revenue', 'Revenue'], ['inventory', 'Inventory'], ['cac', 'CAC'], ['risk', 'Risk']]
 const ORDER = ['fashion', 'startup', 'electronics', 'food']
 
 function heat(v, current) {
   if (v === 0) return { bg: 'transparent', fg: 'var(--muted)', t: '—' }
-  if (v <= -current + 1) return { bg: 'rgba(248,113,113,.28)', fg: C.red, t: 'PAUSE' }
+  if (v <= -current + 1) return { bg: 'rgba(248,113,113,.28)', fg: '#fecaca', t: 'PAUSE' }
   const a = Math.min(0.32, 0.08 + Math.abs(v) / 40000)
-  return v > 0 ? { bg: `rgba(45,212,191,${a})`, fg: C.teal, t: '+' + inr(v) } : { bg: `rgba(248,113,113,${a})`, fg: C.red, t: inr(v) }
+  return v > 0 ? { bg: `rgba(45,212,191,${a})`, fg: '#a7f3d0', t: '+' + inr(v) } : { bg: `rgba(248,113,113,${a})`, fg: '#fecaca', t: inr(v) }
 }
 
 export default function Profile({ company }) {

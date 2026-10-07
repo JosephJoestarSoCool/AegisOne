@@ -1,6 +1,40 @@
+import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { compact, inr, pct, plus, useApi } from '../api'
-import { C, Loading, Tip, TYPE_LABEL, axis } from '../components'
+import { Loading, Tip } from '../components'
+import Icon from '../icons'
+import { Metric } from '../ui'
+import { C, TYPE_LABEL, axis } from '../lib'
+
+function LogRow({ i }) {
+  const [open, setOpen] = useState(false)
+  const scored = i.actual_profit !== null
+  return (
+    <>
+      <tr>
+        <td className="muted num" style={{ whiteSpace: 'nowrap' }}>{i.created_at.slice(0, 10)}</td>
+        <td>
+          <button className="row-btn" aria-expanded={open} disabled={!scored} onClick={() => setOpen(!open)}>
+            <Icon name="chevron" size={14} className={'caret' + (open ? ' open' : '')} />
+            <span><span className="pill" style={{ marginRight: 8 }}>{TYPE_LABEL[i.rec_type] || i.rec_type}</span>{i.title}</span>
+          </button>
+        </td>
+        <td className="r num">{plus(i.expected_profit)}</td>
+        <td className="r num">{scored ? plus(i.actual_profit) : '—'}</td>
+        <td><span className={'pill ' + (i.status === 'approved' ? 'teal' : '')}>{i.status}</span></td>
+      </tr>
+      {open && scored && (
+        <tr className="prow-detail"><td /><td colSpan={4}>
+          <div className="metrics">
+            <Metric text="Actual vs predicted profit: (actual − predicted) ÷ predicted." label="Forecast error" value={(i.error_pct * 100).toFixed(1) + '%'} tone={i.error_pct < 0 ? 'down' : 'up'} />
+            <Metric k="conf" label="Confidence before" value={pct(i.confidence_before)} />
+            <Metric text="Confidence after the engine learned from this outcome." label="Confidence after" value={pct(i.confidence_after)} tone="gold" />
+          </div>
+        </td></tr>
+      )}
+    </>
+  )
+}
 
 export default function History({ company }) {
   const { data, error } = useApi('/history', { company_id: company })
@@ -43,23 +77,17 @@ export default function History({ company }) {
           <div className="muted small" style={{ marginTop: 12 }}>New recommendations of each type inherit this accuracy: confidence × (0.75 + 0.25·accuracy).</div>
         </div>
       </div>
-      <div className="card">
-        <h3>Decision log · prediction → action → outcome → error → confidence</h3>
-        <table className="table">
-          <thead><tr><th>Date</th><th>Action</th><th className="r">Predicted</th><th className="r">Actual</th><th className="r">Error</th><th className="r">Confidence</th><th>Status</th></tr></thead>
-          <tbody>{data.items.map((i) => (
-            <tr key={i.rec_id}>
-              <td className="muted num">{i.created_at.slice(0, 10)}</td>
-              <td><span className="pill" style={{ marginRight: 8 }}>{TYPE_LABEL[i.rec_type] || i.rec_type}</span>{i.title}</td>
-              <td className="r num">{plus(i.expected_profit)}</td>
-              <td className="r num">{i.actual_profit !== null ? plus(i.actual_profit) : '—'}</td>
-              <td className={'r num ' + (i.error_pct === null ? 'muted' : i.error_pct < 0 ? 'down' : 'up')}>{i.error_pct !== null ? (i.error_pct * 100).toFixed(1) + '%' : '—'}</td>
-              <td className="r num">{i.confidence_after !== null ? <>{pct(i.confidence_before)} → <b className="gold">{pct(i.confidence_after)}</b></> : pct(i.confidence)}</td>
-              <td><span className={'pill ' + (i.status === 'approved' ? 'teal' : '')}>{i.status}</span></td>
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
+      <section className="card" aria-labelledby="log-h">
+        <h3 id="log-h">Decision log · prediction → action → outcome</h3>
+        {!data.items.length ? <div className="empty">No decisions yet. Approve a recommendation in the Command Center and it appears here with its measured outcome.</div> : (
+          <div className="tscroll" tabIndex={0} role="region" aria-label="Decision log table, scrollable">
+            <table className="table">
+              <thead><tr><th>Date</th><th>Action</th><th className="r">Predicted</th><th className="r">Actual</th><th>Status</th></tr></thead>
+              <tbody>{data.items.map((i) => <LogRow key={i.rec_id} i={i} />)}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   )
 }

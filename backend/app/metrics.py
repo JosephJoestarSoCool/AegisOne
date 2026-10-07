@@ -222,7 +222,14 @@ def build_state(d: CompanyData, overrides: dict | None = None, policy: Policy | 
 
 
 def daily_series(d: CompanyData, campaign_id: str | None = None) -> pd.DataFrame:
-    """Daily reconciled unified series for a campaign (or whole company)."""
+    """Daily reconciled unified series for a campaign (or whole company). Memoised on the (immutable) CompanyData."""
+    memo = d.__dict__.setdefault("_series_memo", {})
+    if campaign_id not in memo:
+        memo[campaign_id] = _daily_series(d, campaign_id)
+    return memo[campaign_id].copy()
+
+
+def _daily_series(d: CompanyData, campaign_id: str | None) -> pd.DataFrame:
     ad = d.ad if campaign_id is None else d.ad[d.ad.campaign_id == campaign_id]
     rf = d.recon.set_index("sku_id")["recon_factor"]
     ad = ad.assign(orders=ad.platform_orders * ad.sku_id.map(rf))
