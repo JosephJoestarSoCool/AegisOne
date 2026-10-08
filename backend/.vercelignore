@@ -1,0 +1,10 @@
+.venv
+tests
+Dockerfile
+requirements-dev.txt
+data/raw
+data/csv
+data/*.db
+data/*.db-journal
+.pytest_cache
+__pycache__

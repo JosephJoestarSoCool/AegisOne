@@ -28,7 +28,7 @@ PUBLIC DATA → DATA INGESTION / NORMALIZATION → ML PREDICTION → BUSINESS PO
 | --- | --- |
 | `docs/AegisOne_Autonomous_Marketing_CFO.pptx` | The 13-slide deck, rebuilt from live engine output, model card and source metadata by `docs/build_deck.py` |
 | `backend/app/schema.sql` | SQLite schema (15 tables) |
-| `backend/app/ingest.py` | Reproducible public-data ingestion (`python -m app.ingest`): `data/raw/` → `data/processed/` + `sources.json` provenance |
+| `backend/app/ingest.py` | Reproducible public-data ingestion (`python -m app.ingest`): `backend/data/raw/` → `backend/data/processed/` + `sources.json` provenance |
 | `backend/app/brands.py` | Brand data layer: Nike, Samsung, Lenovo, Louis Vuitton, Supreme (public catalog + demo policy/assumptions) |
 | `backend/app/ml.py` | Conversion-propensity model (train / card / predict / bounded engine hook) |
 | `backend/app/datagen.py` | Deterministic simulator (5 brands · 60 campaigns · 60 days) of marketing performance |
@@ -40,7 +40,7 @@ PUBLIC DATA → DATA INGESTION / NORMALIZATION → ML PREDICTION → BUSINESS PO
 | `backend/app/feedback.py` | Approve → simulated outcome → error → updated confidence |
 | `backend/app/demo.py` | The deterministic judge demo |
 | `backend/app/main.py` | FastAPI app |
-| `backend/tests/` | pytest suite (69 tests: engine, API, data provenance, model, ML→optimizer) |
+| `backend/tests/` | pytest suite (74 tests: engine, API, data provenance, model, ML→optimizer, deployment readiness) |
 | `frontend/` | React + Vite + Recharts dashboard |
 
 ## Setup
@@ -52,7 +52,7 @@ Requirements: Python 3.11+ and Node 20+. No paid APIs, no ad-platform credential
 cd backend
 python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-dev.txt  # macOS/Linux: .venv/bin/python  (runtime-only deps: requirements.txt)
-.venv/Scripts/python -m app.datagen                           # writes data/aegis.db + data/csv/*.csv
+.venv/Scripts/python -m app.datagen                           # writes backend/data/aegis.db + backend/data/csv/*.csv
 .venv/Scripts/python -m uvicorn app.main:app --port 8000
 
 # 2. Frontend (second terminal)
@@ -61,7 +61,7 @@ npm install
 npm run dev                                                   # http://localhost:5173 (proxies /api → :8000)
 ```
 
-The API auto-generates the database on first start if `data/aegis.db` is missing. `POST /api/reset` (or the **Reset demo** button) regenerates it and clears learned feedback.
+The API auto-generates the database on first start if `backend/data/aegis.db` is missing. `POST /api/reset` (or the **Reset demo** button) regenerates it and clears learned feedback.
 
 ### Tests
 
@@ -72,7 +72,7 @@ cd backend
 
 ### Frontend tests (Playwright + axe)
 
-Starts its **own** isolated stack (backend :8101 with `data/e2e.db`, Vite :5183) and never reuses a process already on those ports, so it cannot test a stale backend; `e2e/global-setup.js` verifies the backend is healthy and is the current five-brand build before any browser test runs. Needs Google Chrome installed.
+Starts its **own** isolated stack (backend :8101 with `backend/data/e2e.db`, Vite :5183) and never reuses a process already on those ports, so it cannot test a stale backend; `e2e/global-setup.js` verifies the backend is healthy and is the current five-brand build before any browser test runs. Needs Google Chrome installed.
 
 ```bash
 cd frontend
@@ -99,12 +99,12 @@ No brand ad-account data is used or claimed. Four classes are kept apart in the 
 ```bash
 cd backend
 .venv/Scripts/python -m pip install -r requirements-dev.txt
-.venv/Scripts/python -m app.ingest          # downloads data/raw/*, writes data/processed/* + sources.json  (--refresh to re-download)
-.venv/Scripts/python -m app.ml              # trains the model, writes data/models/{conversion_model.joblib,model_card.json}
-.venv/Scripts/python -m app.datagen         # simulates marketing performance and rebuilds data/aegis.db
+.venv/Scripts/python -m app.ingest          # downloads backend/data/raw/*, writes backend/data/processed/* + sources.json  (--refresh to re-download)
+.venv/Scripts/python -m app.ml              # trains the model, writes backend/data/models/{conversion_model.joblib,model_card.json}
+.venv/Scripts/python -m app.datagen         # simulates marketing performance and rebuilds backend/data/aegis.db
 ```
 
-`data/raw/` is git-ignored (re-downloaded on demand); `data/processed/` and `data/models/` are small and committed.
+`backend/data/raw/` is git-ignored (re-downloaded on demand); `backend/data/processed/` and `backend/data/models/` are small and committed.
 
 **ML layer.** A Poisson gradient-boosted model (selected over a Poisson GLM by 5-fold CV deviance) predicts approved purchases per click from four scale-free funnel features (log CTR, CPC and CPM indices, impression index). The signal is modest (see the **ML Lab** page for the real metrics and an honest reading), so the engine takes only 35% of the relative prediction, clipped to 0.85–1.15×, as a multiplier on a campaign's expected orders. Policy, guardrails and the optimizer are unchanged and remain the source of truth: **ML predicts, the CFO layer decides.**
 
@@ -124,89 +124,94 @@ Then open **ML Lab** (training data, features, validation, prediction trace) and
 
 ## Production Deployment
 
-**Architecture (what is hosted where)**
+Two separate Vercel projects from this one GitHub repository (`JosephJoestarSoCool/AegisOne`), plus a Docker alternative for the API.
 
 ```
 USER (browser)
  ↓  HTTPS
-VERCEL — static React/Vite frontend            (frontend/, built to frontend/dist)
- ↓  HTTPS, CORS-restricted, VITE_API_BASE_URL
-DOCKER HOST — FastAPI backend                  (backend/Dockerfile: Render, Railway, Fly.io, Cloud Run, a VM, ...)
+VERCEL PROJECT 1 — static React/Vite frontend          Root Directory: frontend
+ ↓  HTTPS, CORS-restricted, VITE_API_URL
+VERCEL PROJECT 2 — FastAPI backend (Python function)   Root Directory: backend
  ↓
-DATA + ML — baked SQLite demo DB, data/processed CSVs, data/models/*.joblib
+DATA + ML — backend/data/processed, backend/data/models (bundled, read-only) + SQLite in the function's temp dir
  ↓
-DETERMINISTIC CFO DECISION ENGINE              (policy → guardrails → optimizer → next ₹1)
+DETERMINISTIC CFO DECISION ENGINE                      (policy → guardrails → optimizer → next ₹1)
 ```
 
-The backend is deliberately **not** run as Vercel serverless functions: it needs scikit-learn/pandas (a large Python bundle), a
-SQLite file that the approve → feedback loop writes to, and a loaded model. A stateless function filesystem would silently drop
-those writes and make cold starts slow, so the API stays a normal long-running service. The frontend is a static bundle and fits
-Vercel as-is. Nothing here has been deployed from this repository yet; the steps below are the exact manual path.
+### 1. Backend project (FastAPI on Vercel)
 
-**1. Backend (any Docker host)**
+| Setting | Value |
+| --- | --- |
+| Root Directory | `backend` |
+| Framework Preset | FastAPI (auto-detected) |
+| Entrypoint | `app.main:app`, declared in `backend/pyproject.toml` (`[tool.vercel] entrypoint`) |
+| Python | 3.14 (`backend/.python-version`; Vercel supports 3.12 / 3.13 / 3.14) |
+| Dependencies | `backend/pyproject.toml` (identical to `requirements.txt`; a test enforces it) |
+| Build / Install / Output | leave defaults |
+| Function config | `backend/vercel.json`: `maxDuration` 60, tests/raw data/Dockerfile excluded from the bundle |
 
-```bash
-docker build -f backend/Dockerfile -t aegisone-api .      # run from the repository root
-docker run -p 8000:8000 -e AEGIS_CORS_ORIGINS=https://<your-frontend>.vercel.app aegisone-api
-curl http://localhost:8000/api/health                      # {"status":"ok"}
-```
+Everything the API reads at runtime is inside `backend/`: `backend/data/processed` (public catalogs, training data, `sources.json`) and `backend/data/models` (trained model + card). `backend/data/raw` is git-ignored and not needed. All paths are relative to the package, never absolute machine paths.
 
-The image installs `backend/requirements.txt`, copies `backend/app`, `data/processed` and `data/models`, and **bakes the
-deterministic demo database** (`python -m app.datagen`) so every cold start is identical. On a Docker host set the health check
-to `/api/health` and the start command is already in the image (`uvicorn … --port ${PORT:-8000}`). The Dockerfile has not been
-built in this repository's development environment (no Docker available); the same install and start sequence was verified in a
-clean virtual environment (see QA below).
+**Environment variables (Vercel → Project → Settings → Environment Variables):**
 
-**2. Frontend (Vercel)**
-
-* Import the repository, set **Root Directory = `frontend`**. Vercel detects Vite: build `npm run build`, output `dist`. No `vercel.json` is needed (the app has no URL routes; navigation is in-app state, so there is nothing to rewrite).
-* Add the environment variable **`VITE_API_BASE_URL`** = the backend's public `https://` origin (no trailing slash) for **Production** and **Preview** (and optionally Development).
-* Redeploy after changing it: Vite inlines it at build time.
-
-**3. Environment variables (all non-secret)**
-
-| Variable | Where | Purpose |
+| Variable | Required | Meaning |
 | --- | --- | --- |
-| `VITE_API_BASE_URL` | Vercel (build time, **public**) | Backend origin. Unset in development → Vite proxies `/api` to `127.0.0.1:8000`. |
-| `AEGIS_CORS_ORIGINS` | Backend host | Comma-separated frontend origins allowed by CORS. Required in production. No wildcard is used. |
-| `AEGIS_DB` | Backend host (optional) | SQLite path. Point at a persistent disk to keep approvals across restarts. |
-| `AEGIS_ENABLE_RESET` | Backend host (optional) | `0` disables `POST /api/reset` (the demo's Reset button). Default `1`. |
-| `PORT` | Backend host | Provided by most hosts; defaults to 8000. |
+| `AEGIS_CORS_ORIGINS` | **yes** | Comma-separated frontend origins allowed by CORS, e.g. `https://aegisone.vercel.app`. Replaces the dev default; `http://localhost:5173` is only allowed when this is unset. No wildcard. |
+| `AEGIS_CORS_ORIGIN_REGEX` | optional | Regex for Vercel preview URLs of the frontend project, e.g. `https://aegisone-.*\.vercel\.app` |
+| `AEGIS_ENABLE_RESET` | optional | `0` disables `POST /api/reset` (the demo's Reset button). Default `1`. |
 
-There are **no server secrets** in this application (no API keys, tokens or credentials). Copy `frontend/.env.example` and
-`backend/.env.example` as references; real `.env*` files are git-ignored. Never put secrets in `VITE_*` variables: they are
-bundled into public JavaScript.
+There are no secrets. `VERCEL=1` is set by the platform and switches the SQLite file to the temp directory.
 
-**4. Database and data assumptions**
+Check after deploying: `https://<api-project>.vercel.app/api/health` → `{"status":"ok"}` and `/api/companies` lists 5 brands.
 
-* SQLite holds the deterministic **demo** data (simulated marketing performance on public product data) plus the decisions you approve. It is rebuilt identically by `python -m app.datagen`; the image ships it pre-built.
-* Approvals/feedback are written to that file. On a host **without** a persistent disk they are lost on redeploy or restart, and the demo returns to its seeded state, which is the intended judging behaviour. This is not a production multi-user database; moving to Postgres is out of scope and not implied.
-* One API process is assumed (SQLite writes + in-process caches). Do not scale horizontally.
-* `POST /api/reset` regenerates the DB for everyone. Set `AEGIS_ENABLE_RESET=0` on a public deployment you do not want visitors to reset.
+### 2. Frontend project (Vite on Vercel)
 
-**5. ML model and data requirements**
+| Setting | Value |
+| --- | --- |
+| Root Directory | `frontend` |
+| Framework Preset | Vite |
+| Build Command | `npm run build` |
+| Output Directory | `dist` |
+| `frontend/vercel.json` | one rewrite `/(.*)` → `/index.html` so `/optimizer`, `/simulator`, `/history`, `/profile`, `/ml-lab`, `/data-sources`, `/guided-demo`, `/command-center`, `/diagnosis` open (and reload) directly. Static files (`/assets`, `/products`) are served first. |
 
-* Shipped in git and copied into the image: `data/processed/*` (catalogs, ad-conversion training data, `sources.json`) and `data/models/{conversion_model.joblib,model_card.json}`. Raw datasets (`data/raw/`) are git-ignored and **not needed** at runtime.
-* The model is **loaded at startup** (no per-request training). If the artifact cannot be unpickled (different scikit-learn), the API retrains it deterministically at startup (a few seconds). `backend/requirements.txt` pins the versions the artifact was built with.
-* Measured in a clean virtual environment (Python 3.14, runtime requirements only): datagen 4 s; API ready ≈ 10 s after process start; typical API responses 0.2 s warm, up to ≈ 1 s for plan/ML-trace endpoints.
+| Variable | Scope | Meaning |
+| --- | --- | --- |
+| `VITE_API_URL` | Production **and** Preview | The deployed API origin, e.g. `https://aegisone-api.vercel.app` (no trailing slash). Public value, inlined at build time: **redeploy after changing it**. |
 
-**6. Local development**
+URL paths map to the in-app pages (`frontend/src/App.jsx`), so the address bar follows navigation and Back/Forward work; no router library was added. If `VITE_API_URL` is missing, the app shows its "couldn't reach the API" state and never invents data. A render crash shows a recoverable message (error boundary) instead of a blank page. Product images live in `frontend/public/products/` and are served by the frontend project.
+
+### 3. SQLite on serverless: a demo limitation
+
+* The deployment is read-only except the temp directory, so on Vercel the SQLite file lives at `<tmp>/aegis.db` and is **rebuilt deterministically at every cold start** (~4 s, in the app's startup).
+* **Approvals/feedback are not durable.** Each function instance has its own database, and an instance can be recycled at any time, so history can differ between requests or reset. This is acceptable for a deterministic judging demo; it is **not** a production data store.
+* For real persistence, move the decision/feedback tables to **managed Postgres** (or another persistent database) and keep the generated demo data read-only. That migration is intentionally out of scope here.
+* The trained model is loaded from `backend/data/models`; if that artifact can't be loaded (different scikit-learn) the API retrains it deterministically in memory. `pyproject.toml`/`requirements.txt` pin the versions the artifact was built with.
+* Bundle size: pandas + numpy + scikit-learn + SciPy are the bulk of the Python bundle (limit 500 MB uncompressed); runtime dependencies only (no pytest, pptx, pyarrow).
+
+### 4. Docker alternative (any container host)
 
 ```bash
-cd backend && .venv/Scripts/python -m uvicorn app.main:app --port 8000     # API
-cd frontend && npm run dev                                                    # UI on :5173, proxies /api → :8000
+docker build -t aegisone-api backend                 # build context is backend/; bakes the demo DB into the image
+docker run -p 8000:8000 -e AEGIS_CORS_ORIGINS=https://<frontend-origin> aegisone-api
 ```
 
-**7. Production-style verification**
+The Dockerfile has not been built in this repository's development environment (no Docker available). On a host with a persistent disk, set `AEGIS_DB` to a path on it to keep approvals across restarts.
+
+### 5. Local development
 
 ```bash
-cd frontend && npm run test:prod
+cd backend && .venv/Scripts/python -m uvicorn app.main:app --port 8000        # API on http://localhost:8000
+cd frontend && cp .env.example .env.local   # optional: VITE_API_URL=http://localhost:8000 (CORS allows http://localhost:5173)
+cd frontend && npm run dev                  # UI on http://localhost:5173 (without VITE_API_URL it proxies /api to :8000)
 ```
 
-builds the frontend with `VITE_API_BASE_URL` pointing at a **separate** backend origin, starts that backend from a missing database
-with CORS restricted to the preview origin, and checks: every page and all five brands, approve → history, the ML Lab trace, CORS
-(allowed origin accepted, other origins refused), a friendly error + working "Try again" when the API is unreachable, no leaked
-server internals in error messages, and the static-host fallback.
+### 6. Verification that exists in the repo
+
+* `backend/tests/test_deploy.py`: serverless start writes only to the temp dir (nothing under `backend/data`), model-artifact fallback, environment-driven CORS (no wildcard, dev default still works), `pyproject.toml` ⇄ `requirements.txt` parity, no machine-specific paths.
+* `e2e/app.spec.js`: direct URLs and reloads for every page, Back/Forward, unknown paths fall back to the app.
+* `cd frontend && npm run test:prod`: builds the frontend with `VITE_API_URL` pointing at a **separate** backend origin, starts that backend from a missing database with restricted CORS, and checks every page and brand, approve → history, CORS, outage → friendly error → "Try again", no leaked server internals, deep links, and that the built bundle contains no `localhost:8000` URL.
+
+Not verified here: an actual Vercel deployment (no Vercel account or CLI in this environment).
 
 ## How it works
 

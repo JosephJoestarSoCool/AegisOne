@@ -15,6 +15,13 @@ const Optimizer = lazyPage('Optimizer')
 const Profile = lazyPage('Profile')
 const WhatIf = lazyPage('WhatIf')
 
+/** In-app pages <-> URL paths, so a direct visit or reload of /optimizer, /ml-lab, ... lands on that page. */
+const PATHS = {
+  demo: '/guided-demo', command: '/command-center', diagnosis: '/diagnosis', optimizer: '/optimizer', profile: '/profile',
+  whatif: '/simulator', mllab: '/ml-lab', sources: '/data-sources', history: '/history',
+}
+const pageFromPath = (p) => Object.keys(PATHS).find((k) => PATHS[k] === p.replace(/\/+$/, '')) ?? 'demo'
+
 const NAV = [
   ['demo', 'Guided Demo', 'play'],
   ['command', 'Command Center', 'command'],
@@ -39,7 +46,7 @@ const TITLES = {
 }
 
 export default function App() {
-  const [page, setPage] = useState('demo')
+  const [page, setPage] = useState(() => pageFromPath(window.location.pathname))
   const [company, setCompany] = useState('nike')
   const [focus, setFocus] = useState(null)
   const [preset, setPreset] = useState(null)
@@ -47,6 +54,14 @@ export default function App() {
   const comps = useApi('/companies')
   const brands = useApi('/brands')
   useEffect(() => { document.documentElement.dataset.brand = company }, [company])
+  useEffect(() => {                                   // keep the address bar in step with the page (no router library needed)
+    if (window.location.pathname.replace(/\/+$/, '') !== PATHS[page] && !(page === 'demo' && window.location.pathname === '/')) window.history.pushState(null, '', PATHS[page])
+  }, [page])
+  useEffect(() => {
+    const onPop = () => setPage(pageFromPath(window.location.pathname))
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
   const diag = useApi('/overview', { company_id: company })
   const go = (p, f = null, pre = null) => { setNav(false); setPage(p); setFocus(f); if (pre) setPreset(pre) }
   const [title, sub] = TITLES[page]

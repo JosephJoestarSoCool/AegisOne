@@ -16,6 +16,7 @@ from .demo import demo as run_demo
 # Public, non-secret configuration (see backend/.env.example).
 DEV_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 CORS_ORIGINS = [o.strip() for o in os.environ.get("AEGIS_CORS_ORIGINS", DEV_ORIGINS).split(",") if o.strip()]
+CORS_REGEX = os.environ.get("AEGIS_CORS_ORIGIN_REGEX") or None     # optional, e.g. Vercel preview URLs of this project
 ENABLE_RESET = os.environ.get("AEGIS_ENABLE_RESET", "1") != "0"
 
 
@@ -29,7 +30,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AegisOne — Autonomous Marketing CFO", version="1.0.0", lifespan=lifespan)
 # Explicit origins only (no wildcard). No cookies or credentials are used, so none are allowed.
-app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST", "OPTIONS"],
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_origin_regex=CORS_REGEX, allow_methods=["GET", "POST", "OPTIONS"],
                    allow_headers=["Content-Type"], allow_credentials=False)
 
 
@@ -187,6 +188,6 @@ def reset():
     if not ENABLE_RESET:
         raise HTTPException(403, "reset is disabled on this deployment")
     from .datagen import build_database
-    build_database()
+    build_database(write_csv=False)
     svc.clear_cache()
     return {"status": "reset"}

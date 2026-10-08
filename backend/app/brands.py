@@ -3,7 +3,7 @@
 Single place that turns (public catalog data) + (demo assumptions) into the tables the generator writes.
 Nothing here is first-party brand data. Every field is tagged with its provenance class:
 
-  PUBLIC       product name, category, INR price, popularity signal  <- data/processed/catalog_<brand>.csv
+  PUBLIC       product name, category, INR price, popularity signal  <- backend/data/processed/catalog_<brand>.csv
   ASSUMPTION   policy weights/guardrails, unit-cost ratios, inventory cover, lead times, scripted events
   SIMULATED    campaign spend/impressions/clicks/orders, derived from PUBLIC popularity + ASSUMPTION parameters
 """

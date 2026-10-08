@@ -1,0 +1,18 @@
+# Vercel reads this file for the Python runtime: dependencies and the FastAPI entrypoint.
+# Keep `dependencies` identical to requirements.txt (Docker / local installs); a test enforces it.
+[project]
+name = "aegisone-api"
+version = "1.0.0"
+description = "AegisOne autonomous Marketing CFO API"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pandas==3.0.6",
+  "numpy==2.5.3",
+  "scikit-learn==1.9.1",
+  "joblib>=1.3",
+]
+
+[tool.vercel]
+entrypoint = "app.main:app"

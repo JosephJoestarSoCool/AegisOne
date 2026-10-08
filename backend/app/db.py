@@ -11,7 +11,7 @@ from .config import DB_PATH
 def ensure_db() -> None:
     if not DB_PATH.exists():
         from .datagen import build_database
-        build_database()
+        build_database(write_csv=False)      # CSV exports are a dev convenience (`python -m app.datagen`)
 
 
 def connect() -> sqlite3.Connection:

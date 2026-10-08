@@ -1,8 +1,8 @@
 """Conversion-propensity model (ML layer). It PREDICTS; the deterministic CFO engine DECIDES.
 
-Run:  python -m app.ml            (from backend/)  -> trains, writes data/models/{conversion_model.joblib,model_card.json}
+Run:  python -m app.ml            (from backend/)  -> trains, writes backend/data/models/{conversion_model.joblib,model_card.json}
 
-Training data : a real public Facebook-ad dataset (data/processed/ad_conversions.csv, 1,143 ads).
+Training data : a real public Facebook-ad dataset (backend/data/processed/ad_conversions.csv, 1,143 ads).
 Target        : approved (purchase) conversions per click, a rate, fitted with click weights.
 Features      : scale-free funnel features available both in the training data and in the app's
                 campaign state: log CTR, log CPC index, log CPM index, impression-volume index.
@@ -165,30 +165,37 @@ def train() -> dict:
                         f"{int(ML_WEIGHT * 100)}% of the relative signal, clipped to {ML_CLIP[0]}–{ML_CLIP[1]}×, and the deterministic CFO still decides."),
         engine_link=dict(weight=ML_WEIGHT, clip=list(ML_CLIP)),
         data_source="marketing")
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    joblib.dump(dict(model=final, features=FEATURES, version=MODEL_VERSION), MODEL_PATH)
-    CARD_PATH.write_text(json.dumps(card, indent=2), encoding="utf-8")
+    global _MODEL, _CARD
+    _MODEL, _CARD = dict(model=final, features=FEATURES, version=MODEL_VERSION), card
+    try:                                   # best effort: a read-only deployment keeps the fresh model in memory only
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        joblib.dump(_MODEL, MODEL_PATH)
+        CARD_PATH.write_text(json.dumps(card, indent=2), encoding="utf-8")
+    except OSError:
+        pass
     return card
 
 
 _MODEL = None
+_CARD = None
 
 
 def load():
     global _MODEL
     if _MODEL is None:
-        if not MODEL_PATH.exists() or not CARD_PATH.exists():
-            train()
         try:
+            if not MODEL_PATH.exists() or not CARD_PATH.exists():
+                raise FileNotFoundError(MODEL_PATH)
             _MODEL = joblib.load(MODEL_PATH)
-        except Exception:    # e.g. artifact pickled by another scikit-learn version: retrain deterministically
-            train()
-            _MODEL = joblib.load(MODEL_PATH)
+        except Exception:    # missing artifact, or one pickled by another scikit-learn version: retrain deterministically
+            train()          # (sets _MODEL / _CARD in memory even when the artifact cannot be written)
     return _MODEL
 
 
 def card() -> dict:
     load()
+    if _CARD is not None:
+        return _CARD
     return json.loads(CARD_PATH.read_text(encoding="utf-8"))
 
 

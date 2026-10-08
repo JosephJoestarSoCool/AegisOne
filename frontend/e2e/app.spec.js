@@ -377,3 +377,27 @@ test.describe('Optimizer product art (local brand images)', () => {
     }
   })
 })
+
+test('direct URLs open the right page, reloads keep it, and back/forward work (SPA fallback)', async ({ page }) => {
+  const ROUTES = [['/guided-demo', 'Guided Demo'], ['/command-center', 'Command Center'], ['/diagnosis', 'AI Diagnosis'], ['/optimizer', 'Budget Optimizer'],
+    ['/profile', 'Company Profile'], ['/simulator', 'What-If Simulator'], ['/ml-lab', 'ML Lab'], ['/data-sources', 'Data Sources'], ['/history', 'Decision History']]
+  for (const [path, title] of ROUTES) {
+    const res = await page.goto(path)
+    expect(res.status()).toBe(200)
+    await expect(page.locator('.topbar h1')).toHaveText(title)
+    await page.reload()
+    await expect(page.locator('.topbar h1')).toHaveText(title)
+  }
+  await page.goto('/')
+  await expect(page.locator('.topbar h1')).toHaveText('Guided Demo')                   // home keeps the existing default
+  await page.getByRole('button', { name: 'Budget Optimizer' }).click()
+  await expect(page).toHaveURL(/\/optimizer$/)
+  await page.getByRole('button', { name: 'ML Lab' }).click()
+  await expect(page).toHaveURL(/\/ml-lab$/)
+  await page.goBack()
+  await expect(page.locator('.topbar h1')).toHaveText('Budget Optimizer')
+  await page.goForward()
+  await expect(page.locator('.topbar h1')).toHaveText('ML Lab')
+  await page.goto('/no-such-page')
+  await expect(page.locator('.topbar h1')).toHaveText('Guided Demo')                   // unknown paths fall back to the app, never a 404
+})

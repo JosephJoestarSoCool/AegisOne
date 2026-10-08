@@ -2,7 +2,7 @@
 
 Run:  python -m app.datagen            (from backend/)
 
-Writes data/aegis.db (SQLite) and data/csv/*.csv.
+Writes backend/data/aegis.db (SQLite) and backend/data/csv/*.csv.
 Five brands, 12 campaigns each, 60 days of daily metrics, with scripted
 anomalies injected into the last ~8 days so the diagnosis engine has real
 signals to find. The generator knows the ground truth; the engine never reads it.
@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from .brands import build_tables
-from .config import AS_OF, CSV_DIR, DATA_DIR, DB_PATH, HISTORY_DAYS, SCHEMA_PATH, SEED
+from .config import AS_OF, CSV_DIR, DB_PATH, HISTORY_DAYS, SCHEMA_PATH, SEED
 
 # --------------------------------------------------------------------------- #
 # Static reference data
@@ -214,7 +214,7 @@ def _past_decisions(frames: dict[str, pd.DataFrame], rng: np.random.Generator):
 # --------------------------------------------------------------------------- #
 
 def build_database(db_path=DB_PATH, write_csv: bool = True) -> dict[str, pd.DataFrame]:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     frames = generate()
     if db_path.exists():
         db_path.unlink()

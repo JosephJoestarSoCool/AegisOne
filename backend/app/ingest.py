@@ -2,8 +2,8 @@
 
 Run:  python -m app.ingest            (from backend/)   [--refresh to re-download]
 
-raw/        data/raw/        third-party files exactly as downloaded (git-ignored; re-downloaded on demand)
-processed/  data/processed/  small, cleaned, schema-validated files the app reads (committed)
+raw/        backend/data/raw/        third-party files exactly as downloaded (git-ignored; re-downloaded on demand)
+processed/  backend/data/processed/  small, cleaned, schema-validated files the app reads (committed)
 
 PROVENANCE RULE: every file below is a *third-party public dataset*. None is first-party
 advertising data from Nike, Samsung, Lenovo, Louis Vuitton or Supreme, and none contains

@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { expect, test } from '@playwright/test'
 
 const API = 'http://127.0.0.1:8201'
@@ -84,4 +86,15 @@ test('the SPA serves index.html for unknown paths (static-host fallback)', async
   const r = await request.get(`${UI}/some/deep/link`)
   expect(r.status()).toBe(200)
   expect(await r.text()).toContain('<div id="root">')
+})
+
+test('production build: deep links work and the bundle contains no localhost API URL', async ({ page }) => {
+  await page.goto('/optimizer')
+  await expect(page.locator('.topbar h1')).toHaveText('Budget Optimizer')
+  await expect(page.locator('.winner')).toBeVisible()
+  const dist = path.resolve('dist/assets')
+  for (const f of fs.readdirSync(dist).filter((n) => n.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(dist, f), 'utf8')
+    expect(src, f).not.toMatch(/localhost:8000|127\.0\.0\.1:8000/)
+  }
 })

@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-/**
- * API base URL. Empty in development (the Vite dev server proxies /api to the local backend, same-origin).
- * In production set VITE_API_BASE_URL to the deployed FastAPI origin, e.g. https://aegisone-api.example.com
- * (public, non-secret value: it is bundled into the client).
- */
-const BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
-const url = (path, params) => BASE + '/api' + path + (params ? '?' + new URLSearchParams(params) : '')
+import { apiUrl } from './config'
 
 export class ApiError extends Error {
   constructor(kind, status) {
@@ -19,7 +13,7 @@ export class ApiError extends Error {
 async function j(r) {
   // Never surface response bodies (they can contain server internals) to the UI.
   if (!r.ok) throw new ApiError('http', r.status)
-  return r.json()
+  try { return await r.json() } catch { throw new ApiError('http', r.status) }     // e.g. an HTML page from a mis-pointed API URL
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -33,7 +27,7 @@ async function getOnce(u) {
 }
 
 export function get(path, params) {
-  const u = url(path, params)
+  const u = apiUrl(path, params)
   if (inflight.has(u)) return inflight.get(u)
   const run = (async () => {
     for (let i = 0; ; i++) {
@@ -51,7 +45,7 @@ export function get(path, params) {
 export const post = async (path, body) => {
   let res
   try {
-    res = await fetch(url(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    res = await fetch(apiUrl(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   } catch { throw new ApiError('network') }
   return j(res)
 }

@@ -21,12 +21,12 @@ export default defineConfig({
   webServer: [
     {
       command: `"../backend/.venv/Scripts/python.exe" -m uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port ${API_PORT}`,
-      env: { AEGIS_DB: '../data/e2e.db' },
+      env: { AEGIS_DB: '../backend/data/e2e.db' },
       url: `${API}/api/health`, reuseExistingServer: false, timeout: 90_000,
     },
     {
       command: 'npm run dev',
-      env: { AEGIS_API_URL: API, AEGIS_UI_PORT: String(UI_PORT) },
+      env: { AEGIS_API_URL: API, AEGIS_UI_PORT: String(UI_PORT), VITE_API_URL: '' },   // '' = same-origin, through the dev proxy
       url: UI, reuseExistingServer: false, timeout: 60_000,
     },
   ],
