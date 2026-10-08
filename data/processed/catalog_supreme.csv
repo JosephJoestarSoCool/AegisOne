@@ -1,0 +1,7 @@
+name,category,price_inr,popularity,source_rows,sku_key
+Supreme Hoodie,Hoodies,12234.0,0.9,32,supreme-hoodie
+Box Logo T-Shirt (demo SKU),Tees,4200.0,0.35,0,box-logo-t-shirt-demo-sku
+Skate Deck (demo SKU),Hardgoods,7000.0,0.45,0,skate-deck-demo-sku
+Six-Panel Cap (demo SKU),Headwear,5800.0,0.55,0,six-panel-cap-demo-sku
+Shoulder Bag (demo SKU),Accessories,9500.0,0.65,0,shoulder-bag-demo-sku
+Crewneck Sweatshirt (demo SKU),Sweats,15500.0,0.75,0,crewneck-sweatshirt-demo-sku

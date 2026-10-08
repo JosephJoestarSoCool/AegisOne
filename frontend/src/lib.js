@@ -38,3 +38,9 @@ export const DIM_NOTE = {
   cac: 'Weight on keeping acquisition cost and ROAS inside their limits.',
   risk: 'Weight on avoiding volatile or flagged campaigns.',
 }
+
+/** Plain-language API failure message. Never shows response bodies or stack traces. */
+export function errorText(error, what = 'this data') {
+  if (error?.kind === 'http') return `The API returned an error (${error.status}) while loading ${what}.`
+  return `Couldn’t reach the API while loading ${what}. The analysis service may be starting up or temporarily unavailable.`
+}

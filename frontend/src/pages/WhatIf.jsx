@@ -5,7 +5,7 @@ import Icon from '../icons'
 import { WinnerCard } from '../decision'
 import { Disclosure } from '../ui'
 import { Loading, Tip } from '../components'
-import { C, axis, fx, nameOf, shortName } from '../lib'
+import { C, axis, fx, nameOf, shortName, errorText } from '../lib'
 
 const DIMS = [['profitability', 'Profitability'], ['growth', 'Growth'], ['revenue', 'Revenue'], ['inventory', 'Inventory'], ['cac', 'CAC'], ['risk', 'Risk']]
 
@@ -108,7 +108,7 @@ function Simulator({ plan, company, preset }) {
 
         <div className="stack results" aria-live="polite" aria-busy={busy}>
           <div className={'solving' + (busy ? ' on' : '')} role="status">{busy ? <span className="sr-only">Re-solving the decision</span> : null}<i /></div>
-          {out?.error && <div className="err" role="alert">Couldn’t solve this scenario: {String(out.error.message || out.error)}</div>}
+          {out?.error && <div className="err" role="alert">{errorText(out.error, 'this scenario')}</div>}
           {!out && <Loading />}
           {out?.data && <div className={'stack fade' + (busy ? ' stale' : '')}><Result res={out.data} /></div>}
         </div>

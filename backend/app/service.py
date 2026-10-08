@@ -15,6 +15,7 @@ from .policy import WEIGHT_KEYS, Policy
 
 MIN_REC_AMOUNT = 2000.0
 _CACHE: dict[str, CompanyData] = {}
+_PLAN_CACHE: dict[str, dict] = {}
 
 DIM_LABEL = {"profitability": "Profitability", "growth": "Growth", "revenue": "Revenue", "inventory": "Inventory",
              "cac": "CAC / efficiency", "risk": "Risk"}
@@ -22,6 +23,7 @@ DIM_LABEL = {"profitability": "Profitability", "growth": "Growth", "revenue": "R
 
 def clear_cache() -> None:
     _CACHE.clear()
+    _PLAN_CACHE.clear()
 
 
 def get_data(con: sqlite3.Connection, company_id: str) -> CompanyData:
@@ -65,11 +67,26 @@ def resolve_policy(con, d: CompanyData, policy_id: str | None, scenario: dict | 
 
 def build_plan(con: sqlite3.Connection, company_id: str, policy_id: str | None = None,
                scenario: dict | None = None) -> dict:
+    """Memoised on (company, policy, scenario, learned calibration). Approval status is re-read on every call."""
+    import copy
+    import json
+    key = json.dumps([company_id, policy_id, scenario or {}, sorted(_calibration(con, company_id).items())], sort_keys=True, default=str)
+    if key not in _PLAN_CACHE:
+        if len(_PLAN_CACHE) > 64:
+            _PLAN_CACHE.clear()
+        _PLAN_CACHE[key] = _build_plan(con, company_id, policy_id, scenario)
+    plan = copy.deepcopy(_PLAN_CACHE[key])
+    _attach_status(con, plan["recommendations"])
+    return plan
+
+
+def _build_plan(con: sqlite3.Connection, company_id: str, policy_id: str | None = None,
+                scenario: dict | None = None) -> dict:
     d = get_data(con, company_id)
     scenario = scenario or {}
     pol = resolve_policy(con, d, policy_id, scenario)
     overrides = {k: v for k, v in (scenario.get("sku_overrides") or {}).items() if v}
-    states = build_state(d, overrides, pol)
+    states = build_state(d, overrides, pol, ml=scenario.get("ml") is not False)
     anomalies = detect(d, states, pol)
     cprep = opt.prepare(states, pol, anomalies)
     plan = opt.optimize(cprep, pol, float(scenario.get("total_budget_delta") or 0.0))
@@ -169,6 +186,7 @@ def _candidate(c: dict, m: dict, reason: str | None, a: dict, pol: Policy, cvr_r
         recommended_profit=a["profit_new"] - a["profit_now"], step_profit=m["marginal_profit_per_rupee"] * step,
         confidence=round(_clamp(0.5 * c["fit_quality"] + 0.3 * (1 - c["stockout_risk"]) + 0.2 * (1 - _clamp(c["roas_cv"]))), 2),
         health=_health(c, m["marginal_profit_per_rupee"], cvr_ref, pol),
+        ml_conv_rate=(c.get("ml") or {}).get("conv_rate_per_click"), ml_lift=(c.get("ml") or {}).get("lift"),
     )
 
 
@@ -295,6 +313,7 @@ def _public_campaign(c: dict, m: dict) -> dict:
             "margin", "inventory_days", "stockout_risk", "elasticity", "status", "price", "unit_cost", "on_hand",
             "lead_time", "target_days", "shelf_life"]
     out = {k: c[k] for k in keys}
+    out["ml"] = c.get("ml")
     out["marginal_roas"] = m["marginal_roas"]
     out["marginal_profit_per_rupee"] = m["marginal_profit_per_rupee"]
     return out
@@ -601,3 +620,65 @@ def compare_policies(con, company_id: str) -> dict:
                                                       current=a["current"], by_policy={}))["by_policy"][pid] = a["delta"]
         base_alloc = base_alloc or plan["allocation"]
     return dict(company_id=company_id, policies=out, matrix=list(matrix.values()))
+
+
+# --------------------------------------------------------------------------- #
+# ML Lab: prediction trace  (data -> ML -> policy -> constraints -> optimizer -> next rupee)
+# --------------------------------------------------------------------------- #
+
+def ml_trace(con, company_id: str, campaign_id: str | None = None) -> dict:
+    """Trace one real candidate through every stage using the live engine; nothing is hard-coded."""
+    from . import ml as mlm
+    d = get_data(con, company_id)
+    pol = d.policy
+    states = build_state(d, {}, pol, ml=True)
+    anomalies = detect(d, states, pol)
+    cprep = opt.prepare(states, pol, anomalies)
+    marg = opt.marginal_table(cprep, pol)
+    plan = build_plan(con, company_id)
+    nr = plan["next_rupee"]
+    cid = campaign_id or (nr["campaign_id"] if nr else cprep[0]["campaign_id"])
+    c = next(x for x in cprep if x["campaign_id"] == cid)
+    step = 1000.0
+    t0, t1 = opt.terms(c, c["b0"], pol), opt.terms(c, c["b0"] + step, pol)
+    parts = opt.utility_parts(c, c["b0"], c["b0"] + step, pol)
+    off = build_plan(con, company_id, scenario={"ml": False})
+    nr_off = off["next_rupee"]
+    pre = c.get("orders0_pre_ml", c["orders0"])
+    ml = c.get("ml") or {}
+    alloc = next(a for a in plan["allocation"] if a["campaign_id"] == cid)
+    d_orders = t1["orders"] - t0["orders"]
+    cand = next(x for x in plan["candidates"] if x["campaign_id"] == cid)
+    return dict(
+        company_id=company_id, campaign_id=cid, is_winner=bool(nr and nr["campaign_id"] == cid),
+        inputs=dict(
+            product=c["sku_name"], campaign=c["name"], platform=c["platform"], audience=c["audience"],
+            daily_spend=c["b0"], price=c["price"], unit_cost=c["unit_cost"], contribution_margin=c["margin"],
+            inventory_days=c["inventory_days"], lead_time=c["lead_time"], stockout_risk=c["stockout_risk"],
+            roas=c["roas"], cac=c["cac"], cvr=c["cvr"], ctr=c["ctr"], cpc=c["cpc"], elasticity=c["elasticity"]),
+        model=dict(
+            version=ml.get("version"), model_features=ml.get("features"), conv_rate_per_click=ml.get("conv_rate_per_click"),
+            portfolio_reference_rate=ml.get("portfolio_ref"), relative_to_portfolio=ml.get("relative"),
+            multiplier=ml.get("lift"), weight=mlm.ML_WEIGHT, clip=list(mlm.ML_CLIP),
+            orders_before_ml=pre, orders_after_ml=c["orders0"],
+            incremental_orders_per_step=d_orders, incremental_revenue_per_step=t1["revenue"] - t0["revenue"],
+            incremental_profit_per_step=t1["profit"] - t0["profit"], step=step, confidence=cand["confidence"]),
+        cfo=dict(
+            opportunity_score=alloc["opportunity_score"], policy_value_per_rupee=marg[cid]["mu"],
+            profit_per_rupee=marg[cid]["marginal_profit_per_rupee"], marginal_roas=marg[cid]["marginal_roas"],
+            marginal_cac=step / d_orders if d_orders > 0 else None,
+            policy_adjustment_per_rupee=(marg[cid]["mu"] - marg[cid]["marginal_profit_per_rupee"]),
+            risk_adjustment_per_rupee=parts["risk"] / step,
+            policy_parts={k: v / step for k, v in parts.items()}, eligible=marg[cid]["eligible"], gate_reason=cand["gate_reason"],
+            weights=pol.weights, policy_summary=None),
+        decision=dict(
+            winner_campaign_id=nr["campaign_id"] if nr else None, winner=(nr["campaign"] if nr else None),
+            platform=nr["platform"] if nr else None, current=nr["current"] if nr else None, recommended=nr["recommended"] if nr else None,
+            profit_per_rupee=nr["profit_per_rupee"] if nr else None, why_won=nr["why_won"] if nr else [],
+            runner_up=(nr["alternatives"][0] if nr and nr["alternatives"] else None)),
+        ml_effect=dict(
+            winner_without_ml=(nr_off["campaign_id"] if nr_off else None),
+            winner_with_ml=(nr["campaign_id"] if nr else None),
+            changed=bool(nr and nr_off and nr["campaign_id"] != nr_off["campaign_id"]),
+            profit_with_ml=plan["totals"]["incremental_profit"], profit_without_ml=off["totals"]["incremental_profit"]),
+    )

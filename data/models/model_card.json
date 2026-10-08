@@ -1,0 +1,106 @@
+{
+  "name": "Conversion Propensity Model",
+  "version": "v1.0",
+  "trained_on": "2026-10-08",
+  "task": "Predict approved purchases per click from ad-funnel signals",
+  "target": "approved_conversions / clicks (click-weighted)",
+  "model_type": "HistGradientBoosting (Poisson, depth 2)",
+  "candidates": {
+    "Poisson GLM (linear, interpretable)": {
+      "cv_deviance": 0.12143646550021557,
+      "deviance_reduction_pct": 0.03
+    },
+    "HistGradientBoosting (Poisson, depth 2)": {
+      "cv_deviance": 0.11322665987197444,
+      "deviance_reduction_pct": 6.79
+    }
+  },
+  "n_records": 936,
+  "n_clicks": 38165,
+  "n_features": 4,
+  "features": [
+    {
+      "feature": "imp_idx",
+      "importance": 0.9243,
+      "raw_importance": 0.066189,
+      "label": "Impression volume vs median",
+      "what": "Delivery scale relative to the median ad.",
+      "why": "Heavily-delivered ads reach colder audiences; small ads are usually tightly targeted.",
+      "direction": "lowers",
+      "effect": "Moving from a low (25th pct) to a high (75th pct) value lowers the predicted conversion rate by 84.61 approved purchases per 1,000 clicks, on average."
+    },
+    {
+      "feature": "log_ctr",
+      "importance": 0.0421,
+      "raw_importance": 0.003011,
+      "label": "Click-through rate (log)",
+      "what": "Share of impressions that become clicks, on a log scale.",
+      "why": "A creative that attracts clicks is relevant to its audience; relevance travels with purchase intent.",
+      "direction": "lowers",
+      "effect": "Moving from a low (25th pct) to a high (75th pct) value lowers the predicted conversion rate by 6.53 approved purchases per 1,000 clicks, on average."
+    },
+    {
+      "feature": "log_cpm_idx",
+      "importance": 0.0314,
+      "raw_importance": 0.00225,
+      "label": "Cost per 1,000 impressions vs median (log)",
+      "what": "Auction price of reach relative to the portfolio median.",
+      "why": "Signals audience scarcity/quality and platform competition.",
+      "direction": "lowers",
+      "effect": "Moving from a low (25th pct) to a high (75th pct) value lowers the predicted conversion rate by 10.73 approved purchases per 1,000 clicks, on average."
+    },
+    {
+      "feature": "log_cpc_idx",
+      "importance": 0.0022,
+      "raw_importance": 0.000157,
+      "label": "Cost per click vs portfolio median (log)",
+      "what": "How expensive a click is relative to the median ad in the same portfolio.",
+      "why": "Expensive clicks come from competitive, high-intent auctions; very cheap clicks are often low-intent traffic.",
+      "direction": "raises",
+      "effect": "Moving from a low (25th pct) to a high (75th pct) value raises the predicted conversion rate by 2.37 approved purchases per 1,000 clicks, on average."
+    }
+  ],
+  "validation": {
+    "method": "5-fold cross-validation, out-of-fold predictions",
+    "cv_deviance": 0.11323,
+    "baseline_deviance": 0.12147,
+    "deviance_reduction_pct": 6.79,
+    "spearman_rank_corr": 0.1,
+    "calibration_ratio": 0.997
+  },
+  "quartile_lift": [
+    {
+      "quartile": 1,
+      "predicted": 0.01595274019274826,
+      "actual": 0.015761204543453377,
+      "n": 234
+    },
+    {
+      "quartile": 2,
+      "predicted": 0.029017572406531324,
+      "actual": 0.026558690351793802,
+      "n": 234
+    },
+    {
+      "quartile": 3,
+      "predicted": 0.05999183778996195,
+      "actual": 0.06742532005689901,
+      "n": 234
+    },
+    {
+      "quartile": 4,
+      "predicted": 0.2069549825952864,
+      "actual": 0.22787610619469026,
+      "n": 234
+    }
+  ],
+  "honest_reading": "Weak but measurable: out-of-fold deviance is 6.79% below a constant-rate baseline (rank correlation 0.10). Impression volume vs median carries 92% of the importance, so most of the signal is one feature. Public data for some brands is thin. That is why the engine takes only 35% of the relative signal, clipped to 0.85\u20131.15\u00d7, and the deterministic CFO still decides.",
+  "engine_link": {
+    "weight": 0.35,
+    "clip": [
+      0.85,
+      1.15
+    ]
+  },
+  "data_source": "marketing"
+}

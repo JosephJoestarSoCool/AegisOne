@@ -3,7 +3,7 @@
 Run:  python -m app.datagen            (from backend/)
 
 Writes data/aegis.db (SQLite) and data/csv/*.csv.
-Four companies, ~12 campaigns each, 60 days of daily metrics, with scripted
+Five brands, 12 campaigns each, 60 days of daily metrics, with scripted
 anomalies injected into the last ~8 days so the diagnosis engine has real
 signals to find. The generator knows the ground truth; the engine never reads it.
 """
@@ -17,6 +17,7 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
+from .brands import build_tables
 from .config import AS_OF, CSV_DIR, DATA_DIR, DB_PATH, HISTORY_DAYS, SCHEMA_PATH, SEED
 
 # --------------------------------------------------------------------------- #
@@ -40,156 +41,9 @@ AUDIENCES = {
 
 FORMATS = {"meta": "Carousel", "instagram": "Reel", "google": "Responsive Search", "youtube": "Video 15s"}
 
-# company: (name, vertical, description, profile dict)
-COMPANIES = {
-    "fashion": dict(
-        name="Premium Fashion", vertical="Fashion",
-        description="Luxury-leaning apparel & accessories. Protects margin and brand; tolerates high CAC.",
-        profile=dict(w_profitability=0.28, w_growth=0.10, w_revenue=0.12, w_inventory=0.10, w_cac=0.15,
-                     w_risk=0.25, min_margin=0.45, max_cac=2200, min_roas=3.0, inventory_target_days=30,
-                     ltv_per_customer=3200, price_elasticity=0.8, risk_label="Low risk tolerance"),
-    ),
-    "startup": dict(
-        name="D2C Startup", vertical="Beauty / Skincare",
-        description="Venture-backed skincare brand. Buys growth and new customers, accepts thinner ROAS.",
-        profile=dict(w_profitability=0.12, w_growth=0.32, w_revenue=0.20, w_inventory=0.06, w_cac=0.18,
-                     w_risk=0.12, min_margin=0.30, max_cac=450, min_roas=1.8, inventory_target_days=45,
-                     ltv_per_customer=1500, price_elasticity=1.4, risk_label="High risk tolerance"),
-    ),
-    "electronics": dict(
-        name="Consumer Electronics", vertical="Electronics",
-        description="Thin-margin gadgets. Every rupee of ad spend must clear a strict ROAS bar.",
-        profile=dict(w_profitability=0.30, w_growth=0.08, w_revenue=0.20, w_inventory=0.15, w_cac=0.12,
-                     w_risk=0.15, min_margin=0.12, max_cac=1200, min_roas=5.0, inventory_target_days=40,
-                     ltv_per_customer=1800, price_elasticity=2.0, risk_label="Medium risk tolerance"),
-    ),
-    "food": dict(
-        name="Food / Perishable", vertical="Food & Beverage",
-        description="Short shelf-life goods. Inventory expiry dominates; ads must clear stock before it spoils.",
-        profile=dict(w_profitability=0.18, w_growth=0.12, w_revenue=0.12, w_inventory=0.30, w_cac=0.13,
-                     w_risk=0.15, min_margin=0.30, max_cac=160, min_roas=3.0, inventory_target_days=10,
-                     ltv_per_customer=600, price_elasticity=1.6, risk_label="Medium risk tolerance"),
-    ),
-}
-
-# SKU: (key, name, category, list_price, unit_cost, shelf_life_days, on_hand, lead_time_days, organic_units_per_day)
-SKUS = {
-    "fashion": [
-        ("blazer", "Linen Blazer", "Outerwear", 7800, 3100, 9999, 1500, 21, 4),
-        ("scarf", "Silk Scarf", "Accessories", 3200, 1050, 9999, 2300, 18, 5),
-        ("denim", "Selvedge Denim", "Bottoms", 5400, 2300, 9999, 1300, 25, 3),
-        ("dress", "Evening Dress", "Dresses", 9200, 3900, 9999, 600, 28, 2),
-        ("bag", "Leather Tote", "Bags", 8800, 3800, 9999, 1000, 30, 2.5),
-        ("sneaker", "Court Sneaker", "Footwear", 6400, 3200, 9999, 1400, 20, 3),
-    ],
-    "startup": [
-        ("serum", "Vitamin C Serum", "Serums", 1199, 470, 540, 6000, 20, 25),
-        ("moist", "Hydra Moisturizer", "Moisturizers", 899, 410, 540, 4500, 20, 18),
-        ("sun", "Sunscreen SPF50", "Sun care", 649, 290, 540, 2500, 25, 30),
-        ("night", "Retinol Night Cream", "Moisturizers", 1499, 640, 540, 3200, 22, 10),
-        ("cleanser", "Gentle Cleanser", "Cleansers", 449, 210, 540, 9000, 15, 22),
-        ("hair", "Rosemary Hair Oil", "Hair care", 599, 270, 540, 3500, 18, 15),
-    ],
-    "electronics": [
-        ("earbuds", "Aero Earbuds", "Audio", 3499, 2650, 9999, 6500, 30, 12),
-        ("watch", "Pulse Smartwatch", "Wearables", 7999, 6400, 9999, 2300, 35, 4),
-        ("speaker", "Boom Speaker", "Audio", 4999, 3900, 9999, 2600, 28, 6),
-        ("monitor", "27in 4K Monitor", "Displays", 24999, 21500, 9999, 220, 40, 1.5),
-        ("charger", "GaN Charger", "Accessories", 1999, 1250, 9999, 5000, 20, 20),
-        ("keyboard", "Mech Keyboard", "Accessories", 5499, 4100, 9999, 1500, 30, 3),
-    ],
-    "food": [
-        ("juice", "Cold-Pressed Juice", "Beverages", 180, 95, 5, 900, 1, 30),
-        ("cheese", "Artisan Cheese", "Dairy", 650, 390, 45, 90, 6, 6),
-        ("granola", "Crunch Granola", "Pantry", 380, 240, 150, 4000, 10, 25),
-        ("pasta", "Fresh Pasta Kit", "Chilled", 320, 210, 12, 3400, 3, 20),
-        ("bar", "Protein Bars", "Snacks", 520, 330, 200, 5000, 14, 18),
-        ("kombucha", "Kombucha", "Beverages", 240, 140, 60, 1800, 7, 12),
-    ],
-}
-
-# Campaign: (sku_key, platform, audience, daily_budget, ctr, platform_reported_roas, cpm)
-CAMPAIGNS = {
-    "fashion": [
-        ("blazer", "meta", "lal", 40000, 0.016, 5.3, 270),       # DEMO: creative fatigue
-        ("blazer", "google", "rt", 14000, 0.030, 6.7, 700),
-        ("scarf", "google", "int", 22000, 0.026, 6.5, 358),      # DEMO: best opportunity
-        ("scarf", "instagram", "lal", 12000, 0.019, 4.4, 280),
-        ("denim", "meta", "broad", 26000, 0.013, 4.4, 250),      # competitor price pressure
-        ("denim", "google", "rt", 9000, 0.030, 5.5, 650),
-        ("dress", "instagram", "lal", 24000, 0.014, 5.0, 290),   # CPC spike
-        ("dress", "youtube", "broad", 10000, 0.006, 3.6, 110),
-        ("bag", "meta", "rt", 12000, 0.028, 5.7, 520),           # margin squeeze
-        ("bag", "google", "int", 18000, 0.020, 4.8, 420),
-        ("sneaker", "meta", "broad", 16000, 0.015, 4.0, 240),
-        ("sneaker", "instagram", "lal", 10000, 0.015, 3.3, 270),
-    ],
-    "startup": [
-        ("serum", "meta", "lal", 16000, 0.018, 3.4, 210),
-        ("serum", "instagram", "lal", 14000, 0.020, 3.0, 230),   # conversion drop
-        ("sun", "google", "int", 12000, 0.030, 4.6, 380),
-        ("sun", "meta", "broad", 14000, 0.016, 3.2, 190),
-        ("night", "instagram", "lal", 10000, 0.017, 2.8, 240),
-        ("night", "google", "rt", 6000, 0.035, 5.5, 600),
-        ("cleanser", "meta", "broad", 9000, 0.014, 2.4, 170),    # CPC spike
-        ("cleanser", "meta", "rt", 4000, 0.030, 4.8, 420),
-        ("hair", "youtube", "broad", 8000, 0.007, 2.0, 90),
-        ("hair", "instagram", "lal", 10000, 0.019, 3.3, 220),
-        ("moist", "meta", "lal", 12000, 0.017, 3.0, 200),
-        ("moist", "google", "int", 8000, 0.028, 4.0, 340),
-    ],
-    "electronics": [
-        ("earbuds", "meta", "broad", 20000, 0.022, 9.0, 230),    # unit cost spike -> margin squeeze
-        ("earbuds", "google", "int", 16000, 0.030, 11.0, 420),
-        ("watch", "instagram", "lal", 18000, 0.014, 8.5, 300),
-        ("watch", "google", "rt", 8000, 0.030, 11.5, 650),
-        ("speaker", "google", "int", 15000, 0.028, 10.0, 400),   # CPC spike (festive auction)
-        ("speaker", "meta", "lal", 10000, 0.015, 8.0, 250),
-        ("monitor", "google", "int", 14000, 0.025, 11.0, 380),
-        ("monitor", "youtube", "broad", 6000, 0.007, 7.0, 100),
-        ("charger", "meta", "broad", 10000, 0.020, 6.5, 200),
-        ("charger", "instagram", "lal", 8000, 0.018, 6.0, 230),
-        ("keyboard", "google", "int", 10000, 0.025, 9.0, 350),
-        ("keyboard", "youtube", "broad", 5000, 0.007, 6.5, 110),
-    ],
-    "food": [
-        ("juice", "meta", "lal", 9000, 0.020, 4.8, 180),
-        ("juice", "instagram", "lal", 6000, 0.020, 4.2, 200),
-        ("cheese", "instagram", "lal", 8000, 0.018, 5.0, 220),   # stockout risk
-        ("granola", "google", "int", 9000, 0.030, 5.5, 300),
-        ("granola", "meta", "broad", 8000, 0.016, 3.6, 170),     # creative fatigue
-        ("pasta", "meta", "lal", 8000, 0.018, 3.9, 190),         # overstock vs shelf life
-        ("pasta", "google", "int", 5000, 0.030, 4.5, 320),
-        ("bar", "google", "int", 9000, 0.028, 4.9, 330),
-        ("bar", "youtube", "broad", 4000, 0.007, 2.6, 80),
-        ("kombucha", "instagram", "lal", 7000, 0.020, 3.8, 210),
-        ("kombucha", "meta", "broad", 5000, 0.015, 3.3, 160),
-    ],
-}
-
-# Scripted events. Day index d: 0..59 (59 == AS_OF).
-# campaign events: (company, sku, platform, audience) -> dict(start, ramp, ctr, cpm, cvr, freq)
-CAMPAIGN_EVENTS = {
-    ("fashion", "blazer", "meta", "lal"): dict(start=54, ramp=3, ctr=0.46, cpm=1.06, cvr=1.0, freq=2.4),
-    ("fashion", "denim", "meta", "broad"): dict(start=52, ramp=3, ctr=1.0, cpm=1.0, cvr=0.70, freq=1.0),
-    ("fashion", "dress", "instagram", "lal"): dict(start=55, ramp=2, ctr=1.0, cpm=1.45, cvr=1.0, freq=1.0),
-    ("startup", "serum", "instagram", "lal"): dict(start=53, ramp=2, ctr=1.0, cpm=1.0, cvr=0.52, freq=1.0),
-    ("startup", "cleanser", "meta", "broad"): dict(start=55, ramp=2, ctr=0.97, cpm=1.50, cvr=1.0, freq=1.0),
-    ("electronics", "speaker", "google", "int"): dict(start=55, ramp=2, ctr=1.0, cpm=1.55, cvr=1.0, freq=1.0),
-    ("food", "granola", "meta", "broad"): dict(start=53, ramp=3, ctr=0.62, cpm=1.04, cvr=1.0, freq=2.0),
-}
-# SKU events: (company, sku) -> dict(cost_mult, cost_start, comp_mult, comp_start)
-SKU_EVENTS = {
-    ("fashion", "denim"): dict(comp_mult=0.80, comp_start=52),
-    ("fashion", "bag"): dict(cost_mult=1.16, cost_start=51),
-    ("electronics", "earbuds"): dict(cost_mult=1.17, cost_start=50),
-    ("electronics", "watch"): dict(cost_mult=1.03, cost_start=52),
-}
-
-CREATIVE_AGE_DAYS = {  # creative age at AS_OF (default 12-30 random); fatigued ones are old
-    ("fashion", "blazer", "meta", "lal"): 49,
-    ("food", "granola", "meta", "broad"): 41,
-}
+# Brands, SKUs (public catalog data + demo cost/inventory assumptions), campaigns and scripted events
+# come from the brand data layer (brands.py). All ad-performance numbers below are SIMULATED.
+COMPANIES, SKUS, CAMPAIGNS, CAMPAIGN_EVENTS, SKU_EVENTS, CREATIVE_AGE_DAYS = build_tables()
 
 
 def _mult(ev: dict | None, key: str, d: int) -> float:

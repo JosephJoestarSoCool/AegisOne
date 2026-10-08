@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { inr, pct, plus, post } from './api'
-import { C, TYPE_LABEL } from './lib'
+import { inr, pct, plus, post, retryAll } from './api'
+import { C, TYPE_LABEL, errorText } from './lib'
 
 
 export function Kpi({ label, value, delta, invert }) {
@@ -140,8 +140,17 @@ export function Outcome({ r }) {
   )
 }
 
+export function ErrorState({ error, what }) {
+  return (
+    <div className="err" role="alert">
+      <p style={{ margin: 0 }}>{errorText(error, what)}</p>
+      <button className="btn small" style={{ marginTop: 10 }} onClick={retryAll}>Try again</button>
+    </div>
+  )
+}
+
 export function Loading({ error }) {
-  if (error) return <div className="err" role="alert">Couldn’t reach the API: {String(error.message || error)}. Is the backend running on :8000?</div>
+  if (error) return <ErrorState error={error} />
   return (
     <div className="skeleton" role="status" aria-label="Loading">
       <i style={{ height: 190 }} /><div className="grid g-7-5"><i style={{ height: 220 }} /><i style={{ height: 220 }} /></div><i style={{ height: 260 }} />

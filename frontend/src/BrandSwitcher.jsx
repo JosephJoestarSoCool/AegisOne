@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 
 /** Global brand / company selector (top-left). Listbox popover, fully keyboard operable. */
-export default function BrandSwitcher({ companies, value, onChange }) {
+export default function BrandSwitcher({ companies, brands, value, onChange }) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const root = useRef(null)
   const trigger = useRef(null)
   const optRefs = useRef([])
   const current = companies?.find((c) => c.company_id === value)
+  const meta = (id) => brands?.find((b) => b.company_id === id)
 
   const openMenu = () => {
     setActive(Math.max(0, companies.findIndex((c) => c.company_id === value)))
@@ -51,7 +52,7 @@ export default function BrandSwitcher({ companies, value, onChange }) {
         onClick={() => (open ? close(false) : openMenu())}
         onKeyDown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); openMenu() } }}
       >
-        <span className="brand-mark" aria-hidden="true">₹</span>
+        <span className="brand-mark" aria-hidden="true">{meta(value)?.ticker ?? '₹'}</span>
         <span className="brand-name">
           <b>{current?.name ?? '…'}</b>
           <span>{current?.vertical ?? ''}</span>
@@ -63,7 +64,8 @@ export default function BrandSwitcher({ companies, value, onChange }) {
           <div className="brand-pop-head">
             <small>Brand / company</small>
             <b>{current?.name}</b>
-            <span>{current?.description}</span>
+            <span>{meta(value)?.policy_summary ?? current?.description}</span>
+            <span className="brand-pop-note">Demo policy · public product data · simulated ads</span>
           </div>
           <ul role="listbox" aria-label="Companies" onKeyDown={onKey} aria-activedescendant={`co-${companies[active]?.company_id}`}>
             {companies.map((c, i) => (
@@ -73,7 +75,7 @@ export default function BrandSwitcher({ companies, value, onChange }) {
                 onClick={() => choose(c.company_id)} onMouseMove={() => active !== i && setActive(i)}
                 className={i === active ? 'is-active' : ''}
               >
-                <span className="opt-name">{c.name}<small>{c.vertical}</small></span>
+                <span className="opt-name">{c.name}<small>{meta(c.company_id)?.policy_summary ?? c.vertical}</small></span>
                 {c.company_id === value && <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="m3 7.5 2.7 2.7L11 4.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
               </li>
             ))}

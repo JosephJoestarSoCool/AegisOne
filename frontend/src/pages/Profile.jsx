@@ -4,7 +4,7 @@ import { DIM_NOTE } from '../lib'
 import { Disclosure, Hint } from '../ui'
 
 const DIMS = [['profitability', 'Profitability'], ['growth', 'Growth'], ['revenue', 'Revenue'], ['inventory', 'Inventory'], ['cac', 'CAC efficiency'], ['risk', 'Risk control']]
-const ORDER = ['fashion', 'startup', 'electronics', 'food']
+const ORDER = ['nike', 'samsung', 'lenovo', 'lv', 'supreme']
 const SOFT = '#fecaca', GOOD = '#a7f3d0'
 
 function heat(v, current) {

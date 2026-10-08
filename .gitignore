@@ -1,6 +1,7 @@
 # secrets / env
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 
@@ -16,6 +17,7 @@ __pycache__/
 data/*.db
 data/*.db-journal
 data/csv/
+data/raw/
 
 # node / build
 node_modules/

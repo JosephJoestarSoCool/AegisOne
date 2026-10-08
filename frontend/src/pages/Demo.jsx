@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { inr, pct, plus, post, useApi } from '../api'
-import { Ring, RecCard, Tip } from '../components'
+import { Ring, RecCard, Tip, ErrorState } from '../components'
 import { CandidateDrawer, TrapCard, Verdict, WhyNot, WinnerCard } from '../decision'
 import Icon from '../icons'
 import { C, axis, fx, nameOf } from '../lib'
@@ -11,7 +11,7 @@ const STEPS = ['Data', 'Diagnose', 'Compare', 'Decide', 'Simulate', 'Approve', '
 const PHASES = ['Reconcile platform data against the sales ledger', 'Diagnose anomalies and their causes', 'Rank every product × campaign × platform', 'Solve the budget and re-run the what-if']
 
 function DemoLoading({ error }) {
-  if (error) return <div className="err" role="alert">Couldn’t run the demo analysis: {String(error.message || error)}. Is the backend running on :8000?</div>
+  if (error) return <ErrorState error={error} what="the demo analysis" />
   return (
     <div className="card demo-load" role="status" aria-label="Loading">
       <div className="eyebrow">Running the full analysis on the backend</div>
@@ -20,13 +20,14 @@ function DemoLoading({ error }) {
   )
 }
 
-export default function Demo({ go, setCompany }) {
+export default function Demo({ go, setCompany, companies }) {
   const { data, error, reload } = useApi('/demo')
   const [step, setStep] = useState(0)
   const [outcome, setOutcome] = useState(null)
   const [busy, setBusy] = useState(false)
   const [sel, setSel] = useState(null)
   if (!data) return <div className="page"><DemoLoading error={error} /></div>
+  const cname = companies?.find((c) => c.company_id === data.company_id)?.name ?? data.company_id
   const d1 = data.step1_data, a = data.step2_diagnosis, cmp = data.step_compare, r = data.step3_decision, w = data.step4_whatif
   const rc = d1.reconciliation, camp = d1.campaign
   const win = cmp.next_rupee
@@ -40,20 +41,22 @@ export default function Demo({ go, setCompany }) {
   }
   const resetAll = async () => { await post('/reset', {}); setOutcome(null); setStep(0); setSel(null); reload() }
   const roasDrop = ((camp.roas / mean('roas') - 1) * 100)
+  const tgtName = cmp.candidates.find((c) => c.sku_id === data.target_sku)?.sku_name ?? 'the winner'
+  const errPct = outcome ? outcome.error_pct : null
   const HEAD = [
     [`Platforms over-claim orders by ${pct(rc.overcount_pct)}.`, 'Every number downstream uses reconciled orders, not the platform’s claim.'],
-    [`${camp.name}: ROAS ${roasDrop.toFixed(0)}% vs its own baseline.`, 'The engine reads the signals and names the cause, with a confidence.'],
-    [`${cmp.candidates.length} product × campaign options compete for the next ₹1.`, 'Ranked on incremental profit per ₹1 and the brand’s policy, not on ROAS.'],
-    ['The decision: move budget to the winner.', 'Sized by the optimizer inside every guardrail.'],
-    [`Supplier delay: only ${w.stock_units} scarves left.`, 'Change the business and the decision re-solves.'],
+    [`${camp.name} is losing efficiency: ROAS ${roasDrop.toFixed(0)}% vs its own baseline.`, 'The engine reads the signals and names the cause, with a confidence.'],
+    [`${tgtName} has the better marginal return.`, `${cmp.candidates.length} product × campaign options compete for the next ₹1, ranked on incremental profit per ₹1 and policy, not ROAS.`],
+    [`Shift ${inr(r.amount)}/day.`, 'Sized by the optimizer inside every guardrail.'],
+    [`Supplier delay: only ${w.stock_units} units of ${tgtName} left.`, 'Change the business and the decision re-solves.'],
     ['Approve, and the system measures what happened.', 'No hard-coded answers: the outcome is simulated and scored.'],
-    ['It compares prediction to reality, then recalibrates.', 'Future recommendations of this type inherit the learned accuracy.'],
+    [errPct == null ? 'The model compares prediction to reality.' : `The model was ${Math.abs(errPct * 100).toFixed(0)}% too ${errPct < 0 ? 'optimistic' : 'conservative'}.`, 'It recalibrates: future recommendations of this type inherit the learned accuracy.'],
   ]
   return (
     <div className="page">
       <div className="row between wrap">
         <div>
-          <div className="eyebrow">Guided demo · Premium Fashion · deterministic</div>
+          <div className="eyebrow">Guided demo · {cname} · deterministic</div>
           <h2 className="demo-h">{HEAD[step][0]}</h2>
           <div className="muted">{HEAD[step][1]}</div>
         </div>
@@ -144,7 +147,7 @@ export default function Demo({ go, setCompany }) {
 
         {step === 2 && (
           <div className="stack">
-            <Verdict w={win} company="Premium Fashion" hasRec={false} onOpen={setSel} />
+            <Verdict w={win} company={cname} hasRec={false} onOpen={setSel} />
             <div className="grid g-7-5"><WhyNot alts={win?.alternatives} onOpen={setSel} /><TrapCard trap={cmp.roas_trap} candidates={cmp.candidates} /></div>
           </div>
         )}
@@ -162,7 +165,7 @@ export default function Demo({ go, setCompany }) {
               <Icon name="arrow" size={22} className="cmp-arrow" />
               <WinnerCard label="After · re-solved" w={w.next_rupee.after} tone="changed" other={w.next_rupee.before} />
             </section>
-            <div className="row"><button className="btn teal" onClick={() => { setCompany('fashion'); go('whatif', null, { sku: data.target_sku, on_hand: w.stock_units }) }}>Open in the simulator <Icon name="right" size={14} /></button></div>
+            <div className="row"><button className="btn teal" onClick={() => { setCompany(data.company_id); go('whatif', null, { sku: data.target_sku, on_hand: w.stock_units }) }}>Open in the simulator <Icon name="right" size={14} /></button></div>
           </div>
         )}
 
@@ -215,8 +218,8 @@ export default function Demo({ go, setCompany }) {
                 {w.next_rupee.changed && <span className="muted small">If the supplier delay hits: <b style={{ color: 'var(--text)' }}>{nameOf(w.next_rupee.after)}</b> at {fx(w.next_rupee.after.profit_per_rupee)}</span>}
               </div>
               <div className="row wrap">
-                <button className="btn ghost" onClick={() => { setCompany('fashion'); go('history') }}>See decision history <Icon name="right" size={14} /></button>
-                <button className="btn ghost" onClick={() => { setCompany('startup'); go('command') }}>Try another brand’s policy <Icon name="right" size={14} /></button>
+                <button className="btn ghost" onClick={() => { setCompany(data.company_id); go('history') }}>See decision history <Icon name="right" size={14} /></button>
+                <button className="btn ghost" onClick={() => { setCompany(companies?.find((c) => c.company_id !== data.company_id)?.company_id ?? data.company_id); go('command') }}>Try another brand <Icon name="right" size={14} /></button>
               </div>
             </section>
           </div>

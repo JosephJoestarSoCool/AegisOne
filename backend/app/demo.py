@@ -3,18 +3,27 @@ from __future__ import annotations
 
 from . import service as svc
 
-DEMO_COMPANY = "fashion"
-DEMO_CAMPAIGN = "fashion-c01"          # Linen Blazer · Meta · Lookalike 1%  (creative fatigue)
-DEMO_TARGET_SKU = "fashion-scarf"      # Silk Scarf  (best opportunity)
-DEMO_STOCK_UNITS = 200                 # what-if: a supplier delay leaves only 200 scarves on hand
+DEMO_COMPANY = "nike"
+DEMO_STOCK_FRACTION = 0.5   # what-if: a supplier delay leaves the winning product with only enough stock for organic demand
+
+
+def _pick(con):
+    """Choose the demo actors from the live engine: no hard-coded winner."""
+    plan = svc.build_plan(con, DEMO_COMPANY)
+    anomaly = next(a for a in plan["anomalies"] if a["kind"] == "creative_fatigue" and a.get("campaign_id"))
+    decision = next(r for r in plan["recommendations"] if r["rec_type"] == "move_budget"
+                    and r["source_campaign_id"] == anomaly["campaign_id"])
+    return plan, anomaly, decision
 
 
 def demo(con) -> dict:
     d = svc.get_data(con, DEMO_COMPANY)
-    plan = svc.build_plan(con, DEMO_COMPANY)
-    anomaly = next(a for a in plan["anomalies"] if a.get("campaign_id") == DEMO_CAMPAIGN)
-    decision = next(r for r in plan["recommendations"] if r["rec_type"] == "move_budget"
-                    and r["source_campaign_id"] == DEMO_CAMPAIGN)
+    plan, anomaly, decision = _pick(con)
+    DEMO_CAMPAIGN = anomaly["campaign_id"]
+    DEMO_TARGET_SKU = plan["next_rupee"]["sku_id"]
+    prod = d.products.set_index("sku_id").loc[DEMO_TARGET_SKU]
+    lead = float(d.inventory.set_index("sku_id").loc[DEMO_TARGET_SKU, "lead_time_days"])
+    DEMO_STOCK_UNITS = int(round(lead * float(prod["organic_units_per_day"]) * DEMO_STOCK_FRACTION)) or 1
     scenario = {"sku_overrides": {DEMO_TARGET_SKU: {"on_hand": DEMO_STOCK_UNITS}}}
     wi = svc.whatif(con, DEMO_COMPANY, scenario, base=plan)
     sku = plan["campaigns"][decision["target_campaign_id"]]

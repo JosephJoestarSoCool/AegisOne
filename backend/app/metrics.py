@@ -139,7 +139,7 @@ def stockout_risk(days_cover: float, lead_time: float) -> float:
     return float(np.clip((1.5 * lead_time - days_cover) / max(lead_time, 1.0), 0.0, 1.0))
 
 
-def build_state(d: CompanyData, overrides: dict | None = None, policy: Policy | None = None) -> list[dict]:
+def build_state(d: CompanyData, overrides: dict | None = None, policy: Policy | None = None, ml: bool = True) -> list[dict]:
     """Return one dict per campaign with unified metrics. `overrides` = {sku_id: {on_hand, price, unit_cost}}."""
     overrides = overrides or {}
     policy = policy or d.policy
@@ -218,7 +218,8 @@ def build_state(d: CompanyData, overrides: dict | None = None, policy: Policy | 
             elasticity=el[c.campaign_id]["elasticity"], fit_quality=el[c.campaign_id]["quality"],
             fit_r2=el[c.campaign_id]["r2"], roas_cv=roas_cv, status=c.status,
         ))
-    return states
+    from . import ml as _ml
+    return _ml.annotate(states, enabled=ml)
 
 
 def daily_series(d: CompanyData, campaign_id: str | None = None) -> pd.DataFrame:

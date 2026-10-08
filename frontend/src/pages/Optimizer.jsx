@@ -3,6 +3,7 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 import { compact, inr, pct, plus, useApi } from '../api'
 import { Loading, RecCard, Tip } from '../components'
 import { CandidateDrawer } from '../decision'
+import ProductArt from '../ProductArt'
 import Icon from '../icons'
 import { C, axis, fx, nameOf, shortName } from '../lib'
 import { Disclosure, Health, Hint, Metric } from '../ui'
@@ -17,51 +18,67 @@ export default function Optimizer({ company }) {
   const t = data.totals, w = data.next_rupee
   const runner = w?.alternatives?.[0]
   const moves = data.recommendations
+  const topMove = moves.find((m) => m.rec_type === 'move_budget')
   const chart = data.allocation.map((a) => ({ name: shortName(a.name), Current: a.current, Recommended: a.recommended }))
   return (
     <div className="page">
-      <section className="card verdict" aria-labelledby="opt-h">
+      <section className="verdict hero cap" aria-labelledby="opt-h">
         <div className="verdict-main">
+          <span className="wm" aria-hidden="true">{data.company_name}</span>
           <div className="eyebrow">Decision workspace · {data.policy.name} policy</div>
+          <p className="mega" role="heading" aria-level={2}><span>Capital</span><span>allocation</span></p>
           {w ? (
             <>
-              <h2 id="opt-h" className="winner">{w.sku_name}<span> × {w.platform}</span></h2>
-              <div className="muted">Wins the next marginal ₹1 · {w.campaign}</div>
+              <h3 id="opt-h" className="winner">{w.sku_name}<span> × {w.platform}</span></h3>
+              <div className="muted camp">Wins the next marginal ₹1 · {w.campaign}</div>
             </>
-          ) : <h2 id="opt-h" className="winner">No move clears the guardrails</h2>}
+          ) : <h3 id="opt-h" className="winner">No move clears the guardrails</h3>}
+          {w && (
+            <div className="capline" aria-label="Current, recommended and move">
+              <div><span className="eyebrow">Current</span><b className="num">{inr(w.current)}</b></div>
+              <Icon name="arrow" size={28} className="capline-arrow" />
+              <div><span className="eyebrow">Recommended</span><b className="num">{inr(w.recommended)}</b></div>
+              <div><span className="eyebrow">Move</span><b className={'num ' + (w.delta > 0 ? 'up' : w.delta < 0 ? 'down' : '')}>{w.delta ? plus(w.delta) : '—'}</b></div>
+            </div>
+          )}
+          {topMove && (
+            <div className="fromto">
+              <div><span className="eyebrow">From</span><b>{topMove.source_name}</b></div>
+              <Icon name="arrow" size={22} className="muted" />
+              <div><span className="eyebrow">To</span><b>{topMove.target_name}</b></div>
+            </div>
+          )}
           <div className="verdict-kpis">
             <div className="hero-num">
-              <Hint k="ppr" align="left"><span className="eyebrow">Incremental profit</span></Hint>
+              <Hint k="ppr" align="left"><span className="eyebrow">Plan incremental profit</span></Hint>
               <b className="num up">{plus(t.incremental_profit)}<small>/day</small></b>
-              <span className="muted small">≈ {compact(t.incremental_profit_30d)} / 30 days</span>
+              <span className="muted small">≈ {compact(t.incremental_profit_30d)} / 30 days · {inr(t.moved)} moved ({pct(t.moved / t.budget_before)}) · total spend unchanged</span>
             </div>
             {w && (
-              <div className="alloc">
-                <Hint k="ppr" align="left"><span className="eyebrow">Profit / ₹1</span></Hint>
-                <b className="num up" style={{ fontSize: 24 }}>{fx(w.profit_per_rupee)}</b>
+              <div className="hero-num-2">
+                <span className="eyebrow">Profit / ₹1</span>
+                <b className="num up">{fx(w.profit_per_rupee)}</b>
               </div>
             )}
-            <div className="alloc">
-              <span className="eyebrow">Budget moved</span>
-              <b className="num" style={{ fontSize: 24 }}>{inr(t.moved)}</b>
-              <span className="muted small">{pct(t.moved / t.budget_before)} of budget · total spend unchanged</span>
-            </div>
           </div>
         </div>
-        {w && (
-          <div className="verdict-why">
+        <div className="poster"><ProductArt key={company} companyId={company} brand={data.company_name} /></div>
+      </section>
+      {w && (
+        <section className="whyrow" aria-label="Why it won and why the alternative lost">
+          <div>
             <div className="eyebrow">Why it won</div>
             <ul className="why">{w.why_won.slice(0, 3).map((x, i) => <li key={i}>{x}</li>)}</ul>
-            {runner && (
-              <>
-                <div className="eyebrow" style={{ marginTop: 6 }}>Why {nameOf(runner)} lost</div>
-                <ul className="lost">{runner.why_lost.slice(0, 2).map((x, i) => <li key={i}>{x}</li>)}</ul>
-                <button className="link-btn" onClick={() => setSel(runner)}>Compare in detail</button>
-              </>
-            )}
           </div>
-        )}
-      </section>
+          {runner && (
+            <div>
+              <div className="eyebrow">Why {nameOf(runner)} lost</div>
+              <ul className="lost">{runner.why_lost.slice(0, 2).map((x, i) => <li key={i}>{x}</li>)}</ul>
+              <button className="link-btn" onClick={() => setSel(runner)}>Compare in detail</button>
+            </div>
+          )}
+        </section>
+      )}
 
       <section aria-labelledby="moves-h">
         <div className="row between wrap" style={{ marginBottom: 10 }}>

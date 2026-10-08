@@ -2,12 +2,15 @@ import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip,
 import { compact, inr, pct, useApi } from '../api'
 import { useState } from 'react'
 import { CandidateDrawer, Portfolio, TrapCard, Verdict, WhyNot } from '../decision'
+import { Tag } from '../provenance'
 import { Drawer } from '../ui'
 import { Kpi, Loading, RecCard, Tip } from '../components'
 import { C, KIND_TONE, axis } from '../lib'
 
 export default function CommandCenter({ company, go }) {
   const { data, error, loading, reload } = useApi('/overview', { company_id: company })
+  const brands = useApi('/brands')
+  const meta = brands.data?.find((b) => b.company_id === company)
   const [sel, setSel] = useState(null)
   const [review, setReview] = useState(false)
   if (!data) return <div className="page"><Loading error={error} /></div>
@@ -16,11 +19,17 @@ export default function CommandCenter({ company, go }) {
   const w = data.next_rupee
   return (
     <div className="page">
-      <Verdict w={w} company={data.company.name} hasRec={!!top} onReview={() => setReview(true)} onOpen={setSel} />
-      <div className="grid g-7-5">
-        <WhyNot alts={w?.alternatives} onOpen={setSel} />
-        <TrapCard trap={data.roas_trap} candidates={data.candidates} />
-      </div>
+      {meta && (
+        <div className="ctx row wrap" aria-label="Brand context">
+          <b>{data.company.name}</b><span className="muted">{meta.policy_summary}</span>
+          <Tag kind="assumption" /><Tag kind="public">Public product data</Tag><Tag kind="sim" />
+          <button className="btn ghost small" onClick={() => go('sources')}>Data sources</button>
+          <button className="btn ghost small" onClick={() => go('mllab')}>How the model decides</button>
+        </div>
+      )}
+      <Verdict w={w} company={data.company.name} hasRec={!!top} onReview={() => setReview(true)} onOpen={setSel} headline />
+      <WhyNot alts={w?.alternatives} onOpen={setSel} />
+      <TrapCard trap={data.roas_trap} candidates={data.candidates} />
       <Portfolio rows={data.candidates} winnerId={w?.campaign_id} onOpen={setSel} />
       <Drawer open={review && !!top} onClose={() => setReview(false)} title="Recommended action" kicker="Review & approve">
         {top && <RecCard rec={top} top onDecided={reload} expanded={false} />}

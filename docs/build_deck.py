@@ -44,7 +44,7 @@ FONT = "Segoe UI"
 prs = Presentation()
 prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
 BLANK = prs.slide_layouts[6]
-TOTAL = 12
+TOTAL = 13
 
 
 def inr(x: float) -> str:
@@ -176,10 +176,20 @@ def clean_axes(ch, val_fmt=None, gridlines=True):
 con = connect()
 svc.clear_cache()
 D = demo(con)
-P = svc.build_plan(con, "fashion")
-CMP = svc.compare_policies(con, "fashion")
-OV = svc.overview(con, "fashion")
-d = svc.get_data(con, "fashion")
+CO = D["company_id"]
+P = svc.build_plan(con, CO)
+CMP = svc.compare_policies(con, CO)
+OV = svc.overview(con, CO)
+d = svc.get_data(con, CO)
+BRAND = P["company_name"]
+COS = ["nike", "samsung", "lenovo", "lv", "supreme"]
+LAB = {"nike": "Nike", "samsung": "Samsung", "lenovo": "Lenovo", "lv": "LV", "supreme": "Supreme"}
+from app import ml as mlm  # noqa: E402
+from app.brands import sources as brand_sources  # noqa: E402
+CARD_ML = mlm.card()
+SRC = brand_sources()
+TGT = next(c for c in P["campaigns"].values() if c["sku_id"] == D["target_sku"])
+TGT_NAME, TGT_LEAD = TGT["sku_name"], int(TGT["lead_time"])
 A = D["step2_diagnosis"]
 R = D["step3_decision"]
 W = D["step4_whatif"]
@@ -246,7 +256,7 @@ text(s, 0.95, 4.75, 3.7, 1.9, ["…and then?", "", "Why did it drop?", "How much
 gaps = [("Descriptive, not prescriptive", "Charts show what happened. Nobody decides what to do about it.", RED),
         ("Siloed & self-attributed", "Each platform over-claims credit; no single version of truth.", GOLD),
         ("Blind to the business", "Margin, inventory, competitor price never reach the bid decision.", TEAL),
-        ("One-size-fits-all targets", "A luxury label and a perishable-food brand get the same ROAS goal.", BLUE),
+        ("One-size-fits-all targets", "A luxury label and a thin-margin hardware brand get the same ROAS goal.", BLUE),
         ("Open loop", "Decisions are never compared to outcomes, so nothing is learned.", VIOLET)]
 for i, (h, b, col) in enumerate(gaps):
     y = 2.1 + i * 0.95
@@ -329,10 +339,10 @@ s = slide(5, "Business Policy Engine", "Same campaign. Different company. Differ
 names = {p["policy_id"]: p["policy_name"] for p in CMP["policies"]}
 cd = CategoryChartData()
 dims = ["profitability", "growth", "revenue", "inventory", "cac", "risk"]
-cd.categories = [names[k] for k in ("fashion", "startup", "electronics", "food")]
+cd.categories = [names[k] for k in COS]
 for dm_ in dims:
     cd.add_series({"cac": "CAC", "risk": "Risk"}.get(dm_, dm_.capitalize()),
-                  [next(p for p in CMP["policies"] if p["policy_id"] == k)["weights"][dm_] for k in ("fashion", "startup", "electronics", "food")])
+                  [next(p for p in CMP["policies"] if p["policy_id"] == k)["weights"][dm_] for k in COS])
 gf = s.shapes.add_chart(XL_CHART_TYPE.BAR_STACKED_100, Inches(0.55), Inches(2.05), Inches(5.9), Inches(3.0), cd)
 ch = gf.chart
 style_chart(ch, size=9)
@@ -346,40 +356,43 @@ ch.plots[0].gap_width = 45
 ch.plots[0].overlap = 100
 text(s, 0.65, 5.12, 5.8, 0.3, "OBJECTIVE WEIGHTS ABOVE · GUARDRAILS BELOW", size=10, bold=True, color=MUTED)
 pp = {p["policy_id"]: p for p in CMP["policies"]}
-rows = [("", "Fashion", "Startup", "Electr.", "Food"),
-        ("Min margin",) + tuple(f"{pp[k]['min_margin']*100:.0f}%" for k in ("fashion", "startup", "electronics", "food")),
-        ("Min ROAS",) + tuple(f"{pp[k]['min_roas']:.1f}×" for k in ("fashion", "startup", "electronics", "food")),
-        ("Max CAC",) + tuple(f"₹{pp[k]['max_cac']:,.0f}" for k in ("fashion", "startup", "electronics", "food")),
-        ("Stock target",) + tuple(f"{pp[k]['inventory_target_days']:.0f} d" for k in ("fashion", "startup", "electronics", "food"))]
-rect(s, 0.65, 5.42, 5.8, 1.5, fill=CARD)
+rows = [("",) + tuple(LAB[k] for k in COS),
+        ("Min margin",) + tuple(f"{pp[k]['min_margin']*100:.0f}%" for k in COS),
+        ("Min ROAS",) + tuple(f"{pp[k]['min_roas']:.1f}×" for k in COS),
+        ("Max CAC",) + tuple(f"₹{pp[k]['max_cac']/1000:.1f}k" for k in COS),
+        ("Stock target",) + tuple(f"{pp[k]['inventory_target_days']:.0f} d" for k in COS)]
+rect(s, 0.65, 5.42, 5.95, 1.5, fill=CARD)
 for r_i, row in enumerate(rows):
     for c_i, val in enumerate(row):
-        text(s, 0.8 + (0 if c_i == 0 else 1.35 + (c_i - 1) * 1.1), 5.5 + r_i * 0.285, 1.3 if c_i == 0 else 1.05, 0.25, val,
+        text(s, 0.75 + (0 if c_i == 0 else 1.2 + (c_i - 1) * 0.94), 5.5 + r_i * 0.285, 1.2 if c_i == 0 else 0.92, 0.25, val,
              size=10, bold=(r_i == 0), color=(GOLD if r_i == 0 else (MUTED if c_i == 0 else TEXT)),
              align=PP_ALIGN.LEFT if c_i == 0 else PP_ALIGN.CENTER)
 # right: verdict matrix
-text(s, 6.9, 2.05, 5.8, 0.3, "ONE FASHION CAMPAIGN SET · FOUR POLICIES · DAILY BUDGET CHANGE", size=10, bold=True, color=MUTED)
-pick = ["Linen Blazer · Google · Retargeting 30d", "Silk Scarf · Instagram · Lookalike 1%", "Selvedge Denim · Meta · Broad", "Leather Tote · Meta · Retargeting 30d"]
+text(s, 6.9, 2.05, 5.8, 0.3, f"ONE {BRAND.upper()} CAMPAIGN SET · FIVE DEMO POLICIES · DAILY BUDGET CHANGE", size=10, bold=True, color=MUTED)
 mrows = {m["name"]: m for m in CMP["matrix"]}
-order = ["fashion", "startup", "electronics", "food"]
+spread = lambda m: max(m["by_policy"][k] for k in COS) - min(m["by_policy"][k] for k in COS)   # noqa: E731
+pick = [m["name"] for m in sorted(CMP["matrix"], key=spread, reverse=True)[:4]]   # campaigns the policies disagree on most
+order = COS
 hdr_y = 2.4
 for j, k in enumerate(order):
-    text(s, 9.0 + j * 0.92, hdr_y, 0.9, 0.3, ["Fashion", "Startup", "Electr.", "Food"][j], size=10, bold=True, color=GOLD, align=PP_ALIGN.CENTER)
+    text(s, 8.3 + j * 0.88, hdr_y, 0.86, 0.3, LAB[k], size=9, bold=True, color=GOLD, align=PP_ALIGN.CENTER)
 for i, nm in enumerate(pick):
     m = mrows[nm]
     y = hdr_y + 0.42 + i * 0.78
     rect(s, 6.9, y, 5.8, 0.68, fill=CARD)
-    text(s, 7.05, y + 0.09, 1.95, 0.55, short(nm), size=10, bold=True)
+    text(s, 7.0, y + 0.06, 1.3, 0.6, short(nm), size=8.5, bold=True)
     for j, k in enumerate(order):
         v = m["by_policy"][k]
         paused = v <= -m["current"] + 1
         col = TEAL if v > 0 else (RED if v < 0 else MUTED)
         lbl = "PAUSE" if paused else ("hold" if v == 0 else f"{'+' if v > 0 else '−'}₹{abs(v)/1000:.0f}k")
-        pill(s, 9.02 + j * 0.92, y + 0.17, 0.82, 0.34, lbl, fill=CARD2, color=col, size=10)
+        pill(s, 8.32 + j * 0.88, y + 0.17, 0.8, 0.34, lbl, fill=CARD2, color=col, size=9)
 rect(s, 6.9, 6.1, 5.8, 0.82, fill=CARD2)
-text(s, 7.1, 6.18, 5.4, 0.7, [[("Electronics' 5.0× ROAS bar ", {"bold": True, "color": RED}),
-                              ("pauses Denim·Meta outright; ", {}), ("the Startup's growth weight ", {"bold": True, "color": TEAL}),
-                              ("keeps funding prospecting. Same data, different CFO.", {})]], size=11.5)
+strict = max(COS, key=lambda k: pp[k]["min_roas"])
+growth = max(COS, key=lambda k: pp[k]["weights"]["growth"])
+text(s, 7.1, 6.18, 5.4, 0.7, [[(f"{LAB[strict]}'s {pp[strict]['min_roas']:.1f}× ROAS bar ", {"bold": True, "color": RED}),
+                              ("cuts hardest; ", {}), (f"{LAB[growth]}'s growth weight ", {"bold": True, "color": TEAL}),
+                              ("keeps funding prospecting. Demo policies, same data, different CFO.", {})]], size=11.5)
 
 # =========================================================================
 # 6 AI DIAGNOSIS
@@ -462,14 +475,14 @@ stat(s, 10.5, 4.15, 2.2, f"{dst_m['marginal_roas']:.1f}×", "marginal ROAS, targ
 rect(s, 8.15, 5.5, 4.55, 1.4, fill=CARD)
 text(s, 8.35, 5.6, 4.2, 0.3, "WHY THIS BEAT THE ALTERNATIVES", size=9.5, bold=True, color=MUTED)
 text(s, 8.35, 5.9, 4.2, 1.0, [f"• {dst_m['margin']*100:.0f}% unit margin, {dst_m['inventory_days']:.0f} days of stock cover",
-                                 f"• Fashion policy: profitability {P['policy']['weights']['profitability']*100:.0f}%, risk {P['policy']['weights']['risk']*100:.0f}%",
+                                 f"• {BRAND} demo policy: profitability {P['policy']['weights']['profitability']*100:.0f}%, risk {P['policy']['weights']['risk']*100:.0f}%",
                                  f"• Plan total: +{inr(P['totals']['incremental_profit'])}/day at the same total spend"], size=10.5)
 
 # =========================================================================
 # 8 WHAT-IF
 # =========================================================================
 s = slide(8, "What-if simulation", "Change the business. The decision re-solves instantly.",
-          f"Scenario: a supplier delay leaves only {W['stock_units']} Silk Scarves in stock (from {int(P['campaigns'][R['target_campaign_id']]['on_hand']):,}).")
+          f"Scenario: a supplier delay leaves only {W['stock_units']} units of {TGT_NAME} in stock (from {int(P['campaigns'][R['target_campaign_id']]['on_hand']):,}).")
 def card(s, x, y, w, h, tag, tcol, title_, body, sub, subcol=None):
     rect(s, x, y, w, h, fill=CARD)
     rect(s, x, y, w, 0.07, fill=tcol, shape=MSO_SHAPE.RECTANGLE)
@@ -479,11 +492,11 @@ def card(s, x, y, w, h, tag, tcol, title_, body, sub, subcol=None):
     text(s, x + 0.3, y + h - 0.85, w - 0.6, 0.7, sub, size=24, bold=True, color=subcol or tcol)
 tb_, ta_ = W["top_before"], W["top_after"]
 card(s, 0.65, 2.1, 5.5, 3.6, "BEFORE  ·  stock healthy", TEAL, f"Move {inr(tb_['amount'])}/day\n{short(tb_['source'])}\n→ {short(tb_['target'])}",
-     f"Scarf has {W['target_cover_before']:.0f} days of cover; scaling it is safe.", f"+{inr(tb_['expected_profit'])}/day")
+     f"{TGT_NAME} has {W['target_cover_before']:.0f} days of cover; scaling it is safe.", f"+{inr(tb_['expected_profit'])}/day")
 arrow(s, 6.3, 3.9, 7.0, 3.9, color=GOLD, width=3)
 pill(s, 6.12, 3.35, 1.0, 0.36, "RE-SOLVE", fill=GOLD, color=BG, size=10)
 card(s, 7.15, 2.1, 5.55, 3.6, "AFTER  ·  stock critical", RED, f"Move {inr(ta_['amount'])}/day\n{short(ta_['source'])}\n→ {short(ta_['target'])}",
-     f"Scarf has {W['target_cover_after']:.1f} days of cover vs an 18-day restock — scaling would stock out.", f"+{inr(ta_['expected_profit'])}/day", GOLD)
+     f"{TGT_NAME} has {W['target_cover_after']:.1f} days of cover vs a {TGT_LEAD}-day restock — scaling would stock out.", f"+{inr(ta_['expected_profit'])}/day", GOLD)
 text(s, 0.65, 5.95, 12, 0.3, "LEVERS YOU CAN PULL LIVE IN THE SIMULATOR", size=10, bold=True, color=MUTED)
 for i, lv in enumerate(["Total budget", "Inventory (per SKU)", "Price", "Unit cost / margin", "Company priorities", "Guardrails"]):
     pill(s, 0.65 + i * 2.03, 6.3, 1.9, 0.45, lv, fill=CARD2, color=TEXT, size=11)
@@ -510,7 +523,7 @@ pill(s, 5.2, 4.37, 3.0, 0.36, "feeds the next recommendation", fill=BG, color=VI
 rect(s, 0.65, 5.0, 6.0, 1.85, fill=CARD)
 text(s, 0.9, 5.12, 5.5, 0.3, "WHAT IS STORED", size=9.5, bold=True, color=MUTED)
 text(s, 0.9, 5.45, 5.5, 1.4, ["• recommendation + policy + confidence", "• simulated outcome and signed error", "• per-type calibration (EMA of 1 − |error|)",
-                              "• seeded history: 24 past decisions across 4 companies"], size=11.5)
+                              "• seeded history: 6 past decisions per brand"], size=11.5)
 rect(s, 6.9, 5.0, 5.8, 1.85, fill=CARD)
 text(s, 7.15, 5.12, 5.3, 0.3, "WHY IT MATTERS", size=9.5, bold=True, color=MUTED)
 text(s, 7.15, 5.45, 5.3, 1.4, ["Confidence is earned, not asserted. Move-budget calls that over-promised "
@@ -521,10 +534,10 @@ text(s, 7.15, 5.45, 5.3, 1.4, ["Confidence is earned, not asserted. Move-budget 
 # 10 ARCHITECTURE
 # =========================================================================
 s = slide(10, "System architecture", "Data in, explainable decisions out — fully local")
-layers = [("Data", "Synthetic generator · SQLite\n14 tables · 4 companies · 60 days", BLUE),
-          ("Ingest & reconcile", "pandas · scikit-learn\nsales ↔ platform regression", TEAL),
+layers = [("Public data → simulation", "ingest.py · public catalogs · SQLite\n15 tables · 5 brands · simulated ads", BLUE),
+          ("ML prediction", "Poisson GBM conversion signal\nbounded multiplier, never the decider", TEAL),
           ("AI diagnosis", "robust z-scores + hypothesis scoring\nconfidence per cause", RED),
-          ("Policy engine", "6 weights + 4 guardrails\nper company", VIOLET),
+          ("Policy & guardrails", "6 weights + 4 guardrails per brand\nmargin · ROAS · CAC · stock can override ML", VIOLET),
           ("Optimizer", "concave marginal-utility greedy\nelasticity fit · stock caps", GOLD),
           ("What-if & feedback", "re-solve on any override\nsimulated outcome · calibration", TEAL)]
 for i, (h, b, col) in enumerate(layers):
@@ -538,24 +551,24 @@ for i, (h, b, col) in enumerate(layers):
         arrow(s, x + 2.78, y + 0.8, x + 2.97, y + 0.8, color=MUTED)
 rect(s, 9.75, 2.1, 2.95, 3.45, fill=CARD2, line=GOLD)
 text(s, 9.95, 2.25, 2.6, 0.3, "FASTAPI  /api", size=10, bold=True, color=GOLD)
-text(s, 9.95, 2.65, 2.6, 1.2, ["/overview  /diagnosis", "/plan  /whatif", "/policy-compare", "/recommendations/decide", "/history  /demo"], size=11, color=TEXT)
+text(s, 9.95, 2.65, 2.6, 1.2, ["/overview  /diagnosis", "/plan  /whatif", "/policy-compare", "/ml/card  /ml/trace", "/data-sources  /brands", "/recommendations/decide"], size=11, color=TEXT)
 rect(s, 9.95, 4.15, 2.55, 1.25, fill=BG)
 text(s, 10.1, 4.25, 2.3, 0.3, "REACT + VITE", size=10, bold=True, color=TEAL)
-text(s, 10.1, 4.58, 2.3, 0.8, "Recharts dashboard\n7 decision views", size=11, color=TEXT)
+text(s, 10.1, 4.58, 2.3, 0.8, "Recharts dashboard\n9 views incl. ML Lab, Data Sources", size=11, color=TEXT)
 arrow(s, 9.43, 4.9, 9.74, 4.9, color=GOLD)
 rect(s, 0.65, 5.9, 12.05, 0.9, fill=CARD)
 text(s, 0.9, 6.02, 11.6, 0.7, [[("Explainability by construction: ", {"bold": True, "color": GOLD}),
-                               ("every recommendation carries its why, policy drivers, guardrail checks and confidence — "
-                                "and every figure is a deterministic function of the data and the policy.", {})]], size=12)
+                               ("ML predicts an order signal; the deterministic CFO engine (policy, guardrails, optimizer) decides. "
+                                "Every recommendation carries its why, policy drivers, guardrail checks and confidence.", {})]], size=12)
 
 # =========================================================================
 # 11 DEMO
 # =========================================================================
 s = slide(11, "Demo scenario", "The demo, end to end", "data → diagnosis → decision → what-if → feedback — one deterministic story")
 flow = [("1  DATA", f"{REC['rows']:,} daily ad rows reconciled; platforms over-claim {REC['overcount_pct']*100:.0f}%", TEAL),
-        ("2  DIAGNOSIS", f"{camp['name'].split(' · ')[0]} · Meta ROAS {A['raw']['roas_base']:.1f}→{A['raw']['roas_now']:.1f}. Creative fatigue, {A['confidence']*100:.0f}% confident", RED),
-        ("3  DECISION", f"Move {inr(R['amount'])}/day to Silk Scarf · Google. +{inr(R['expected_profit'])}/day, with the why", GOLD),
-        ("4  WHAT-IF", f"Scarf stock → {W['stock_units']} units. Decision flips to {short(ta_['target'])} ({inr(ta_['amount'])})", BLUE),
+        ("2  DIAGNOSIS", f"{camp['name'].split(' · ')[0]} · {camp['platform'].split()[0]} ROAS {A['raw']['roas_base']:.1f}→{A['raw']['roas_now']:.1f}. Creative fatigue, {A['confidence']*100:.0f}% confident", RED),
+        ("3  DECISION", f"Move {inr(R['amount'])}/day to {short(R['target_name'])}. +{inr(R['expected_profit'])}/day, with the why", GOLD),
+        ("4  WHAT-IF", f"{TGT_NAME} stock → {W['stock_units']} units. Decision flips to {short(ta_['target'])} ({inr(ta_['amount'])})", BLUE),
         ("5  FEEDBACK", f"Approve → outcome {inr(simulated_actual)} vs {inr(R['expected_profit'])} predicted; confidence {R['confidence']*100:.0f}%→{conf_after*100:.0f}%", VIOLET)]
 for i, (h, b, col) in enumerate(flow):
     x = 0.65 + i * 2.45
@@ -574,11 +587,11 @@ text(s, 0.95, 5.93, 11.5, 0.8, [[("Run it:  ", {"bold": True, "color": GOLD}), (
 # 12 IMPACT
 # =========================================================================
 s = slide(12, "Impact & conclusion", "From reporting to deciding",
-          "Modelled on synthetic data for Premium Fashion at ₹2.13 L/day — same total spend, smarter allocation.")
+          f"Modelled on simulated ad performance for {BRAND} at {lakh(P['totals']['budget_before'])}/day — same total spend, smarter allocation. Not a measured result.")
 stat(s, 0.65, 2.1, 3.9, f"+{inr(P['totals']['incremental_profit'])}", "incremental profit per day identified", color=GOLD, h=1.4)
 stat(s, 4.7, 2.1, 3.9, f"≈ {lakh(P['totals']['incremental_profit_30d'])}", "per 30 days — with ₹0 extra ad budget", color=TEAL, h=1.4)
 stat(s, 8.75, 2.1, 3.95, f"{len(P['recommendations'])} actions", "each with a why, confidence and guardrail check", color=BLUE, h=1.4)
-pts = [("Cross-platform truth", "reconciled attribution, one ROAS"), ("Policy-aware", "4 companies → 4 different CFOs"),
+pts = [("Cross-platform truth", "reconciled attribution, one ROAS"), ("Policy-aware", "5 brands → 5 different CFOs"),
        ("Explainable", "anomaly → cause → confidence → action"), ("Self-correcting", "feedback recalibrates confidence")]
 for i, (h, b) in enumerate(pts):
     x = 0.65 + i * 3.04
@@ -589,6 +602,26 @@ rect(s, 0.65, 5.35, 12.05, 1.45, fill=CARD2, line=GOLD)
 text(s, 1.0, 5.5, 11.3, 0.7, "“Instead of telling a company what happened, our AI Marketing CFO decides where the next ₹1 of advertising spend should go.”",
      size=17, bold=True, color=TEXT, spacing=1.05)
 text(s, 1.0, 6.3, 11.3, 0.4, "Next: live ad-API connectors · multi-touch & incrementality tests · bandit exploration · creative generation.", size=11.5, color=MUTED)
+
+s = slide(13, "Appendix · ML layer & data provenance", "ML predicts. The CFO decides.",
+          "PUBLIC DATA → INGESTION → ML PREDICTION → POLICY → GUARDRAILS → PORTFOLIO OPTIMIZER → NEXT ₹1 → SIMULATION → APPROVAL → FEEDBACK")
+v_ = CARD_ML["validation"]
+top_f = CARD_ML["features"][0]
+rect(s, 0.65, 2.1, 6.0, 4.7, fill=CARD)
+text(s, 0.9, 2.25, 5.5, 0.3, "THE MODEL (from model_card.json)", size=10, bold=True, color=GOLD)
+text(s, 0.9, 2.65, 5.5, 4.1, [
+    f"• {CARD_ML['name']} {CARD_ML['version']}: {CARD_ML['model_type']}",
+    f"• Trained on {CARD_ML['n_records']:,} public Facebook-ad records; target: {CARD_ML['target']}",
+    f"• {CARD_ML['n_features']} scale-free funnel features; top feature: {top_f['label']} ({top_f['importance']*100:.0f}% of importance)",
+    f"• 5-fold CV deviance {v_['cv_deviance']} vs baseline {v_['baseline_deviance']} (−{v_['deviance_reduction_pct']}%): weak but measurable",
+    f"• Enters the engine as a multiplier of {CARD_ML['engine_link']['clip'][0]}–{CARD_ML['engine_link']['clip'][1]}× at {CARD_ML['engine_link']['weight']*100:.0f}% weight",
+    "• Margin, inventory, CAC, ROAS, risk and policy guardrails can override the raw signal", "• The system optimises incremental profit, not raw ROAS"], size=11.5)
+rect(s, 6.9, 2.1, 5.8, 4.7, fill=CARD)
+text(s, 7.15, 2.25, 5.3, 0.3, "DATA SOURCES (from sources.json)", size=10, bold=True, color=GOLD)
+lines = [f"• {v['name']} — {v['license']}" for v in SRC.values()]
+text(s, 7.15, 2.65, 5.35, 3.0, lines, size=10)
+text(s, 7.15, 5.5, 5.35, 1.3, ["No brand ad-account data is used or claimed. Spend, clicks, orders, ROAS and CAC are simulated "
+                               "(derived from public product signals). Policies are demo assumptions, not company strategy."], size=10.5, color=MUTED)
 
 prs.save(OUT)
 print("saved", OUT)

@@ -1,6 +1,7 @@
 """FastAPI app for the Autonomous Marketing CFO."""
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI, HTTPException
@@ -12,15 +13,24 @@ from .db import connect, ensure_db, read
 from .demo import demo as run_demo
 
 
+# Public, non-secret configuration (see backend/.env.example).
+DEV_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+CORS_ORIGINS = [o.strip() for o in os.environ.get("AEGIS_CORS_ORIGINS", DEV_ORIGINS).split(",") if o.strip()]
+ENABLE_RESET = os.environ.get("AEGIS_ENABLE_RESET", "1") != "0"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    ensure_db()
+    ensure_db()          # builds the deterministic demo DB if it is missing (a baked image already has it)
+    from . import ml
+    ml.load()            # load (or, if the artifact is unusable, retrain) the model at startup, not on the first request
     yield
 
 
 app = FastAPI(title="AegisOne — Autonomous Marketing CFO", version="1.0.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-                   allow_methods=["*"], allow_headers=["*"])
+# Explicit origins only (no wildcard). No cookies or credentials are used, so none are allowed.
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST", "OPTIONS"],
+                   allow_headers=["Content-Type"], allow_credentials=False)
 
 
 def _company(con, company_id: str) -> None:
@@ -42,6 +52,36 @@ def companies():
         pols = all_policies(con)
         rows = read(con, "SELECT * FROM companies")
         return [dict(**r, policy=pols[r["company_id"]].to_dict()) for r in rows.to_dict("records")]
+    finally:
+        con.close()
+
+
+@app.get("/api/brands")
+def brands():
+    """Per-brand provenance & policy metadata (public data vs demo assumptions vs simulation)."""
+    from .brands import BRANDS, ORDER, public_meta
+    meta = public_meta()
+    return [dict(meta[b], name=BRANDS[b]["name"], vertical=BRANDS[b]["vertical"]) for b in ORDER]
+
+
+@app.get("/api/data-sources")
+def data_sources():
+    from .brands import sources
+    return list(sources().values())
+
+
+@app.get("/api/ml/card")
+def ml_card():
+    from . import ml
+    return ml.card()
+
+
+@app.get("/api/ml/trace")
+def ml_trace(company_id: str, campaign_id: str | None = None):
+    con = connect()
+    try:
+        _company(con, company_id)
+        return svc.ml_trace(con, company_id, campaign_id)
     finally:
         con.close()
 
@@ -143,7 +183,9 @@ def demo():
 
 @app.post("/api/reset")
 def reset():
-    """Regenerate the synthetic database and clear caches (also clears learned feedback)."""
+    """Regenerate the synthetic database and clear caches (also clears learned feedback). Disable with AEGIS_ENABLE_RESET=0."""
+    if not ENABLE_RESET:
+        raise HTTPException(403, "reset is disabled on this deployment")
     from .datagen import build_database
     build_database()
     svc.clear_cache()

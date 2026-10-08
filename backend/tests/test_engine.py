@@ -4,10 +4,16 @@ import pytest
 
 from app import feedback as fb
 from app import service as svc
-from app.demo import DEMO_CAMPAIGN, DEMO_COMPANY, demo
+from app.demo import DEMO_COMPANY, demo
 from app.metrics import build_state, load_company
 
-COMPANIES = ["fashion", "startup", "electronics", "food"]
+COMPANIES = ["nike", "samsung", "lenovo", "lv", "supreme"]
+
+
+def _stock_scenario(con):
+    """The demo's supplier-delay scenario, derived from the live engine (no hard-coded winner)."""
+    r = demo(con)
+    return r["scenario"], r["target_sku"]
 REQUIRED_TABLES = ["companies", "company_profiles", "campaigns", "products", "platforms", "audiences", "creatives",
                    "ad_metrics", "sales", "inventory", "pricing", "competitor_prices", "recommendations", "feedback"]
 
@@ -23,7 +29,7 @@ def test_schema_and_relationships(con):
     assert orphans == 0
     assert con.execute("SELECT COUNT(*) FROM campaigns c LEFT JOIN ad_metrics m USING(campaign_id) "
                        "WHERE m.campaign_id IS NULL").fetchone()[0] == 0
-    assert con.execute("SELECT COUNT(DISTINCT company_id) FROM company_profiles").fetchone()[0] == 4
+    assert con.execute("SELECT COUNT(DISTINCT company_id) FROM company_profiles").fetchone()[0] == 5
 
 
 @pytest.mark.parametrize("cid", COMPANIES)
@@ -54,7 +60,7 @@ def test_every_anomaly_is_explained(con, cid):
 
 def test_demo_diagnosis_is_creative_fatigue(con):
     plan = svc.build_plan(con, DEMO_COMPANY)
-    a = next(x for x in plan["anomalies"] if x.get("campaign_id") == DEMO_CAMPAIGN)
+    a = next(x for x in plan["anomalies"] if x["kind"] == "creative_fatigue" and x.get("campaign_id"))
     assert a["kind"] == "creative_fatigue" and a["confidence"] >= 0.85
     assert a["raw"]["roas_now"] < 0.6 * a["raw"]["roas_base"]
 
@@ -71,12 +77,12 @@ def test_optimizer_conserves_budget_and_explains(con, cid):
             assert all(g["ok"] for g in r["guardrails"] if "ROAS" in g["label"] or "Margin" in g["label"])
 
 
-def test_demo_headline_move_is_12000(con):
+def test_demo_headline_move_comes_from_the_fatigued_campaign(con):
     dm = demo(con)
     r = dm["step3_decision"]
-    assert r["rec_type"] == "move_budget" and r["amount"] == 12000
-    assert r["source_campaign_id"] == DEMO_CAMPAIGN
-    assert "Silk Scarf" in r["target_name"]
+    assert r["rec_type"] == "move_budget" and r["amount"] > 0
+    assert r["source_campaign_id"] == dm["campaign_id"] == dm["step2_diagnosis"]["campaign_id"]
+    assert dm["step2_diagnosis"]["kind"] == "creative_fatigue"
 
 
 def test_demo_inventory_change_flips_recommendation(con):
@@ -87,28 +93,30 @@ def test_demo_inventory_change_flips_recommendation(con):
 
 
 def test_whatif_unchanged_when_nothing_changes(con):
-    res = svc.whatif(con, "fashion", {})
+    res = svc.whatif(con, DEMO_COMPANY, {})
     assert not res["changed"] and abs(res["profit_delta"]) < 1e-6
 
 
 def test_whatif_extra_budget_adds_increase(con):
-    res = svc.whatif(con, "fashion", {"total_budget_delta": 10000})
+    res = svc.whatif(con, DEMO_COMPANY, {"total_budget_delta": 10000})
     assert any(r["rec_type"] == "increase_budget" for r in res["scenario"]["recommendations"])
     assert res["scenario"]["totals"]["budget_after"] > res["baseline"]["totals"]["budget_after"]
 
 
 def test_whatif_margin_override_blocks_scaling(con):
-    res = svc.whatif(con, "fashion", {"sku_overrides": {"fashion-scarf": {"unit_cost": 2900}}})
-    scarf = [a for a in res["scenario"]["allocation"] if a["sku_id"] == "fashion-scarf"]
+    plan = svc.build_plan(con, DEMO_COMPANY)
+    tgt = plan["next_rupee"]
+    price = next(c["price"] for c in plan["campaigns"].values() if c["sku_id"] == tgt["sku_id"])
+    floor = plan["policy"]["min_margin"]
+    res = svc.whatif(con, DEMO_COMPANY, {"sku_overrides": {tgt["sku_id"]: {"unit_cost": price * (1 - floor / 2)}}})
+    scarf = [a for a in res["scenario"]["allocation"] if a["sku_id"] == tgt["sku_id"]]
     assert all(a["recommended"] <= a["current"] for a in scarf)   # margin below policy floor blocks scaling
 
 
 def test_same_data_different_policy_different_decision(con):
-    cmp_ = svc.compare_policies(con, "fashion")
-    vectors = {pid: tuple(m["by_policy"][pid] for m in cmp_["matrix"]) for pid in ("fashion", "startup", "electronics", "food")}
-    assert len(set(vectors.values())) >= 3
-    den = next(m for m in cmp_["matrix"] if "Denim · Meta" in m["name"])
-    assert den["by_policy"]["electronics"] < den["by_policy"]["fashion"]   # strict ROAS bar cuts harder
+    cmp_ = svc.compare_policies(con, DEMO_COMPANY)
+    vectors = {pid: tuple(m["by_policy"][pid] for m in cmp_["matrix"]) for pid in COMPANIES}
+    assert len(set(vectors.values())) >= 4
 
 
 def test_feedback_loop(con):
@@ -145,16 +153,17 @@ def test_company_isolation(con, cid):
 
 def test_next_rupee_is_company_and_policy_specific(con):
     winners = {cid: svc.build_plan(con, cid)["next_rupee"] for cid in COMPANIES}
-    assert len({w["sku_id"] for w in winners.values()}) == 4          # a different product per company
-    p = svc.build_plan(con, "fashion")["portfolio"]
+    assert len({w["sku_id"] for w in winners.values()}) == 5          # a different product per company
+    p = svc.build_plan(con, DEMO_COMPANY)["portfolio"]
     assert p[0]["eligible"] and p[0]["policy_value_per_rupee"] >= max(r["policy_value_per_rupee"] for r in p if r["eligible"])
     assert [r["rank"] for r in p] == list(range(1, len(p) + 1))
 
 
 def test_whatif_can_change_next_rupee_winner(con):
-    res = svc.whatif(con, "fashion", {"sku_overrides": {"fashion-scarf": {"on_hand": 200}}})
-    assert res["baseline"]["next_rupee"]["sku_id"] == "fashion-scarf"
-    assert res["scenario"]["next_rupee"]["sku_id"] != "fashion-scarf"
+    scen, tgt = _stock_scenario(con)
+    res = svc.whatif(con, DEMO_COMPANY, scen)
+    assert res["baseline"]["next_rupee"]["sku_id"] == tgt
+    assert res["scenario"]["next_rupee"]["sku_id"] != tgt
 
 
 @pytest.mark.parametrize("cid", COMPANIES)
@@ -172,10 +181,11 @@ def test_why_not_and_roas_trap(con, cid):
 
 
 def test_whatif_reports_next_rupee_change_with_reason(con):
-    res = svc.whatif(con, "fashion", {"sku_overrides": {"fashion-scarf": {"on_hand": 200}}})
+    scen, tgt = _stock_scenario(con)
+    res = svc.whatif(con, DEMO_COMPANY, scen)
     nr = res["next_rupee"]
-    assert nr["changed"] and nr["before"]["sku_id"] == "fashion-scarf" and nr["after"]["sku_id"] != "fashion-scarf"
+    assert nr["changed"] and nr["before"]["sku_id"] == tgt and nr["after"]["sku_id"] != tgt
     assert nr["reason"]                                   # computed from the engine, never hard-coded
-    same = svc.whatif(con, "fashion", {})
+    same = svc.whatif(con, DEMO_COMPANY, {})
     assert not same["next_rupee"]["changed"] and same["next_rupee"]["reason"] is None
     assert same["next_rupee"]["before"]["profit_per_rupee"] == same["next_rupee"]["after"]["profit_per_rupee"]

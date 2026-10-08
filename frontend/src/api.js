@@ -1,13 +1,63 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+/**
+ * API base URL. Empty in development (the Vite dev server proxies /api to the local backend, same-origin).
+ * In production set VITE_API_BASE_URL to the deployed FastAPI origin, e.g. https://aegisone-api.example.com
+ * (public, non-secret value: it is bundled into the client).
+ */
+const BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
+const url = (path, params) => BASE + '/api' + path + (params ? '?' + new URLSearchParams(params) : '')
+
+export class ApiError extends Error {
+  constructor(kind, status) {
+    super(kind === 'network' ? 'network' : `HTTP ${status}`)
+    this.kind = kind        // 'network' (could not reach the API) | 'http' (API answered with an error)
+    this.status = status
+  }
+}
+
 async function j(r) {
-  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+  // Never surface response bodies (they can contain server internals) to the UI.
+  if (!r.ok) throw new ApiError('http', r.status)
   return r.json()
 }
-export const get = (path, params) =>
-  fetch('/api' + path + (params ? '?' + new URLSearchParams(params) : '')).then(j)
-export const post = (path, body) =>
-  fetch('/api' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(j)
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const RETRY_DELAYS = [500, 1500]          // a cold-starting host usually answers on the 2nd or 3rd try
+const inflight = new Map()                // identical concurrent GETs share one request
+
+async function getOnce(u) {
+  let res
+  try { res = await fetch(u) } catch { throw new ApiError('network') }
+  return j(res)
+}
+
+export function get(path, params) {
+  const u = url(path, params)
+  if (inflight.has(u)) return inflight.get(u)
+  const run = (async () => {
+    for (let i = 0; ; i++) {
+      try { return await getOnce(u) } catch (e) {
+        const transient = e.kind === 'network' || [502, 503, 504].includes(e.status)
+        if (!transient || i >= RETRY_DELAYS.length) throw e
+        await sleep(RETRY_DELAYS[i])
+      }
+    }
+  })().finally(() => inflight.delete(u))
+  inflight.set(u, run)
+  return run
+}
+
+export const post = async (path, body) => {
+  let res
+  try {
+    res = await fetch(url(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  } catch { throw new ApiError('network') }
+  return j(res)
+}
+
+/** Any "Try again" button calls this; every mounted useApi hook refetches. */
+export const retryAll = () => window.dispatchEvent(new Event('aegis:retry'))
 
 /**
  * Fetch on mount and whenever path/params change. Data from a previous path/params is never returned
@@ -25,6 +75,11 @@ export function useApi(path, params) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const again = () => { set((s) => (s.error ? { ...s, error: null } : s)); load() }
+    window.addEventListener('aegis:retry', again)
+    return () => window.removeEventListener('aegis:retry', again)
+  }, [load])
   const fresh = state.key === key
   return { data: fresh ? state.data : null, error: fresh ? state.error : null, loading: !fresh || (!state.data && !state.error), reload: load }
 }
