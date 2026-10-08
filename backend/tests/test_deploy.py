@@ -108,3 +108,21 @@ def test_no_machine_specific_paths_in_source():
     bad = re.compile(r"[A-Za-z]:[\/]Users[\/]|Downloads[\/]|/home/\w+/")
     for f in list((BACKEND / "app").glob("*.py")) + [BACKEND / "vercel.json", BACKEND / "pyproject.toml"]:
         assert not bad.search(f.read_text(encoding="utf-8")), f.name
+
+
+def test_concurrent_first_requests_on_a_cold_instance_do_not_race(tmp_path):
+    """Regression for the production 'Couldn't reach the API' on first load: the app fires several requests at once,
+    and each used to rebuild/delete the not-yet-existing SQLite file while another was writing it (HTTP 500)."""
+    res = _run("""
+import json
+from concurrent.futures import ThreadPoolExecutor
+from fastapi.testclient import TestClient
+from app.main import app
+c = TestClient(app)                              # no `with`: lifespan (startup DB build) deliberately NOT run
+paths = ["/api/companies", "/api/brands", "/api/overview?company_id=nike", "/api/demo", "/api/plan?company_id=lv", "/api/data-sources"]
+with ThreadPoolExecutor(8) as ex:
+    codes = list(ex.map(lambda p: c.get(p).status_code, paths * 2))
+print(json.dumps(dict(codes=codes)))
+""", {"AEGIS_DB": str(tmp_path / "cold.db")}, tmp_path)
+    assert res["codes"] == [200] * 12
+    assert sorted(p.name for p in tmp_path.iterdir() if p.is_file()) == ["cold.db"]     # no leftover temp build files

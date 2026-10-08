@@ -7,6 +7,7 @@ import './styles.css'
 import './lab.css'
 import './editorial.css'
 import './art.css'
+import './impact.css'
 import App from './App.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
 

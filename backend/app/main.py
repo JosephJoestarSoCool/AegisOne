@@ -71,6 +71,19 @@ def data_sources():
     return list(sources().values())
 
 
+@app.get("/api/projected-impact")
+def projected_impact(company_id: str, rec_id: str):
+    con = connect()
+    try:
+        _company(con, company_id)
+        out = svc.projected_impact(con, company_id, rec_id)
+        if out is None:
+            raise HTTPException(404, f"unknown recommendation {rec_id}")
+        return out
+    finally:
+        con.close()
+
+
 @app.get("/api/ml/card")
 def ml_card():
     from . import ml
@@ -187,7 +200,7 @@ def reset():
     """Regenerate the synthetic database and clear caches (also clears learned feedback). Disable with AEGIS_ENABLE_RESET=0."""
     if not ENABLE_RESET:
         raise HTTPException(403, "reset is disabled on this deployment")
-    from .datagen import build_database
-    build_database(write_csv=False)
+    from .db import rebuild_db
+    rebuild_db()
     svc.clear_cache()
     return {"status": "reset"}

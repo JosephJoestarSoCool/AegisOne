@@ -682,3 +682,73 @@ def ml_trace(con, company_id: str, campaign_id: str | None = None) -> dict:
             changed=bool(nr and nr_off and nr["campaign_id"] != nr_off["campaign_id"]),
             profit_with_ml=plan["totals"]["incremental_profit"], profit_without_ml=off["totals"]["incremental_profit"]),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Projected impact of an approved recommendation (Optimizer chart)
+# --------------------------------------------------------------------------- #
+
+PROJECTION_DAYS = 30
+HISTORY_POINTS = 30
+RUN_RATE_DAYS = 7
+_NET_SPEND_SIGN = {"increase_budget": 1.0, "decrease_budget": -1.0}      # move / replace / pause-and-redeploy keep total spend
+
+
+def projected_impact(con, company_id: str, rec_id: str) -> dict:
+    """Actual history -> approval point -> projected trajectory, for one recommendation of the live plan.
+
+    Nothing is invented:
+      * history   = the company's real reconciled daily series (last 30 days).
+      * increment = the recommendation's own engine output (`expected_profit`/day, `amount`) from the optimizer plan.
+      * shape     = the weekday pattern measured on that same real history (so the line is not a straight ramp).
+      * revenue / ROAS are DERIVED from profit and spend through the history's own blended margin (flagged `derived`).
+    """
+    plan = build_plan(con, company_id)
+    rec = next((r for r in plan["recommendations"] if r["rec_id"] == rec_id), None)
+    if rec is None:
+        return None
+    d = get_data(con, company_id)
+    hist = daily_series(d).tail(HISTORY_POINTS).reset_index(drop=True)
+    hist["weekday"] = pd.to_datetime(hist["date"]).dt.weekday
+    metrics = ("spend", "revenue", "profit")
+    factor, run = {}, {}
+    for m in metrics:
+        mean = float(hist[m].mean())
+        by = hist.groupby("weekday")[m].mean()
+        factor[m] = {int(w): (float(by[w] / mean) if mean > 0 and w in by.index else 1.0) for w in range(7)}
+        run[m] = float(hist[m].tail(RUN_RATE_DAYS).mean())
+    tail = hist.tail(RUN_RATE_DAYS)
+    margin = float((tail["profit"].sum() + tail["spend"].sum()) / tail["revenue"].sum())      # blended contribution margin
+    d_profit = float(rec["expected_profit"])
+    d_spend = _NET_SPEND_SIGN.get(rec["rec_type"], 0.0) * float(rec.get("amount") or 0.0)
+    d_rev = (d_profit + d_spend) / margin if margin > 0 else 0.0
+    delta = dict(spend=d_spend, revenue=d_rev, profit=d_profit)
+
+    rows = []
+    for k in range(1, PROJECTION_DAYS + 1):
+        day = pd.Timestamp(AS_OF) + pd.Timedelta(days=k)
+        w = int(day.weekday())
+        base = {m: run[m] * factor[m][w] for m in metrics}
+        proj = {m: (run[m] + delta[m]) * factor[m][w] for m in metrics}
+        rows.append(dict(
+            date=day.strftime("%Y-%m-%d"),
+            spend=proj["spend"], revenue=proj["revenue"], profit=proj["profit"],
+            roas=proj["revenue"] / proj["spend"] if proj["spend"] else None,
+            base_spend=base["spend"], base_revenue=base["revenue"], base_profit=base["profit"],
+            base_roas=base["revenue"] / base["spend"] if base["spend"] else None,
+            profit_shape=factor["profit"][w]))
+    history = [dict(date=r["date"], spend=float(r["spend"]), revenue=float(r["revenue"]), profit=float(r["profit"]),
+                    roas=float(r["revenue"] / r["spend"]) if r["spend"] else None) for r in hist.to_dict("records")]
+    return dict(
+        company_id=company_id, rec_id=rec_id, as_of=AS_OF.isoformat(), horizon_days=PROJECTION_DAYS,
+        rec=dict(rec_type=rec["rec_type"], title=rec["title"], amount=float(rec.get("amount") or 0.0),
+                 expected_profit=d_profit, expected_profit_30d=float(rec.get("expected_profit_30d") or d_profit * PROJECTION_DAYS),
+                 confidence=float(rec["confidence"]), source=rec.get("source_name"), target=rec.get("target_name")),
+        history=history, projection=rows,
+        run_rate=dict(run, roas=run["revenue"] / run["spend"] if run["spend"] else None, days=RUN_RATE_DAYS),
+        increment=dict(delta, roas=None),
+        metrics=[dict(key="profit", label="Contribution profit", derived=False), dict(key="revenue", label="Revenue", derived=True),
+                 dict(key="roas", label="ROAS", derived=True), dict(key="spend", label="Spend", derived=False)],
+        method=("History: real reconciled daily series. Projection: run-rate of the last 7 days plus the approved recommendation's "
+                "own expected incremental profit, shaped by the history's weekday pattern. Revenue and ROAS are derived from "
+                "profit and spend with the history's blended margin."))

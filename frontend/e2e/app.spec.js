@@ -401,3 +401,140 @@ test('direct URLs open the right page, reloads keep it, and back/forward work (S
   await page.goto('/no-such-page')
   await expect(page.locator('.topbar h1')).toHaveText('Guided Demo')                   // unknown paths fall back to the app, never a 404
 })
+
+test.describe('Optimizer projected impact (post-approval)', () => {
+  const approveFirst = async (page) => { await page.getByRole('button', { name: /Approve & simulate/ }).first().click() }
+  const openOptimizer = async (page, request) => { await request.post('/api/reset', { data: {} }); await page.goto('/optimizer'); await expect(page.locator('.rec').first()).toBeVisible() }
+  const firstRec = async (request, company) => (await api(request, '/plan?company_id=' + company)).recommendations[0]
+
+  test('approving reveals the projected impact; before approval only a hint is shown', async ({ page, request }) => {
+    await openOptimizer(page, request)
+    await expect(page.locator('.pi')).toHaveCount(0)
+    await expect(page.getByText('approving one reveals its projected impact')).toBeVisible()
+    const rec = await firstRec(request, 'nike')
+    await approveFirst(page)
+    await expect(page.locator('.pi')).toBeVisible()
+    await expect(page.locator('.pi-stamp')).toHaveText('Approved')
+    await expect(page.locator('.pi-chart')).toContainText('APPROVED')
+    for (const l of ['Actual', 'Projected', 'No-action baseline']) await expect(page.locator('.pi-legend')).toContainText(l)
+    await expect(page.locator('.pi-legend svg.dashed')).toHaveCount(1)
+    await expect(page.locator('.pi-facts')).toContainText('Last 30 days')
+    await expect(page.locator('.pi-facts')).toContainText('Next 30 days')
+    await expect(page.locator('.pi-facts')).toContainText(rec.expected_profit.toLocaleString('en-IN'))
+    await expect(page.locator('.pi-facts')).toContainText(Math.round(rec.confidence * 100) + '%')
+    await expect(page.locator('.pi-note')).toContainText('not results')
+    await expect(page.locator('.rec').first()).toContainText('Approved')
+    await expect(page.locator('.pi-feedback')).toContainText('not live ad data')
+  })
+
+  test('history is the real backend series and the projection comes from the recommendation', async ({ page, request }) => {
+    await openOptimizer(page, request)
+    const rec = await firstRec(request, 'nike')
+    await approveFirst(page)
+    await expect(page.locator('.pi-chart')).toBeVisible()
+    const imp = await api(request, '/projected-impact?company_id=nike&rec_id=' + rec.rec_id)
+    const ov = await api(request, '/overview?company_id=nike')
+    expect(imp.history.map((h) => h.date)).toEqual(ov.trend.map((x) => x.date))
+    imp.history.forEach((h, i) => expect(h.profit).toBeCloseTo(ov.trend[i].profit, 0))
+    expect(imp.history.at(-1).date).toBe(imp.as_of)
+    expect(imp.projection[0].date > imp.as_of).toBe(true)
+    expect(imp.increment.profit).toBe(rec.expected_profit)
+    await page.locator('.pi-table summary').click()
+    await expect(page.locator('.pi-table tbody tr')).toHaveCount(imp.history.length + imp.projection.length)
+    await expect(page.locator('.pi-table tbody tr').first()).toContainText(imp.history[0].date)
+    await expect(page.locator('.pi-table tbody tr').last()).toContainText(imp.projection.at(-1).date)
+  })
+
+  test('metrics switch between profit, revenue, ROAS and spend', async ({ page, request }) => {
+    await openOptimizer(page, request)
+    await approveFirst(page)
+    await expect(page.locator('.pi-chart')).toBeVisible()
+    for (const [name, word] of [['Revenue', 'revenue'], ['ROAS', 'roas'], ['Spend', 'spend'], ['Contribution profit', 'contribution profit']]) {
+      await page.locator('.pi-controls').getByRole('button', { name, exact: true }).click()
+      await expect(page.locator('.pi-controls').getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.locator('.pi-chart')).toHaveAttribute('aria-label', new RegExp('Chart of ' + word))
+    }
+    await page.locator('.pi-controls').getByRole('button', { name: 'Revenue', exact: true }).click()
+    await expect(page.locator('.pi-note')).toContainText('Derived from projected profit and spend')
+  })
+
+  test('feedback: projected vs observed with the feedback engine own error', async ({ page, request }) => {
+    await openOptimizer(page, request)
+    const rec = await firstRec(request, 'nike')
+    await approveFirst(page)
+    await expect(page.locator('.pi-feedback')).toContainText('Reveal simulated outcome')
+    await expect(page.locator('.pi-legend')).not.toContainText('Observed')
+    await page.getByRole('button', { name: 'Reveal simulated outcome' }).click()
+    const hist = await api(request, '/history?company_id=nike')
+    const item = hist.items.find((i) => i.rec_id === rec.rec_id)
+    expect(item.actual_profit).not.toBeNull()
+    const obs = page.locator('.pi-obs')
+    await expect(obs).toContainText('Projected')
+    await expect(obs).toContainText('Observed (simulated)')
+    await expect(obs).toContainText((item.error_pct * 100).toFixed(1) + '%')
+    await expect(obs).toContainText(Math.round(item.confidence_after * 100) + '%')
+    await expect(page.locator('.pi-legend')).toContainText('Observed (simulated outcome)')
+  })
+
+  test('brand isolation: the impact is per brand and resets on a brand switch', async ({ page, request }) => {
+    await openOptimizer(page, request)
+    const calls = []
+    page.on('request', (r) => r.url().includes('/projected-impact') && calls.push(new URL(r.url()).searchParams.get('company_id')))
+    await approveFirst(page)
+    await expect(page.locator('.pi')).toBeVisible()
+    await page.getByRole('button', { name: /Brand \/ company/ }).click()
+    await page.getByRole('option', { name: /Samsung/ }).click()
+    await expect(page.locator('.pi')).toHaveCount(0)
+    await expect(page.locator('.pa-brand b')).toHaveText('Samsung')
+    await approveFirst(page)
+    await expect(page.locator('.pi')).toBeVisible()
+    expect(calls).toEqual(['nike', 'samsung'])
+    const rec = await firstRec(request, 'samsung')
+    const imp = await api(request, '/projected-impact?company_id=samsung&rec_id=' + rec.rec_id)
+    const nike = await api(request, '/projected-impact?company_id=nike&rec_id=' + (await firstRec(request, 'nike')).rec_id)
+    expect(imp.history.map((h) => h.profit)).not.toEqual(nike.history.map((h) => h.profit))
+  })
+
+  test('a11y: no serious axe violations on the approved projected-impact state', async ({ page, request }) => {
+    await openOptimizer(page, request)
+    await approveFirst(page)
+    await page.getByRole('button', { name: 'Reveal simulated outcome' }).click()
+    await expect(page.locator('.pi-obs')).toBeVisible()
+    await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.target?.closest?.('.pa')))
+    await page.waitForTimeout(500)
+    const res = await new AxeBuilder({ page }).include('.pi').withTags(['wcag2a', 'wcag2aa']).analyze()
+    const bad = res.violations.filter((v) => ['serious', 'critical'].includes(v.impact))
+    expect(bad.map((v) => v.id + ': ' + v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | '))).toEqual([])
+  })
+
+  test('reduced motion: the reveal does not animate', async ({ page, request }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await openOptimizer(page, request)
+    await approveFirst(page)
+    await expect(page.locator('.pi')).toBeVisible()
+    const dur = await page.locator('.pi').evaluate((e) => parseFloat(getComputedStyle(e).animationDuration))
+    expect(dur).toBeLessThan(0.01)
+  })
+
+  for (const w of [820, 390]) {
+    test('readable and no horizontal overflow at ' + w + 'px (marker and legend visible)', async ({ page, request }) => {
+      await page.setViewportSize({ width: w, height: 900 })
+      await request.post('/api/reset', { data: {} })
+      await page.goto('/optimizer')
+      await expect(page.locator('.rec').first()).toBeVisible()
+      await approveFirst(page)
+      await page.getByRole('button', { name: 'Reveal simulated outcome' }).click()
+      await expect(page.locator('.pi-obs')).toBeVisible()
+      await page.waitForTimeout(900)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+      const box = await page.locator('.pi-chart').boundingBox()
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(w + 1)
+      await expect(page.locator('.pi-chart')).toContainText('APPROVED')
+      await expect(page.locator('.pi-legend')).toBeVisible()
+      const marker = await page.locator('.pi-approved-t').boundingBox()
+      expect(marker.x).toBeGreaterThanOrEqual(0)
+      expect(marker.x + marker.width).toBeLessThanOrEqual(w)
+    })
+  }
+})

@@ -4,6 +4,7 @@ import { compact, inr, pct, plus, useApi } from '../api'
 import { Loading, RecCard, Tip } from '../components'
 import { CandidateDrawer } from '../decision'
 import ProductArt from '../ProductArt'
+import ProjectedImpact from '../ProjectedImpact'
 import Icon from '../icons'
 import { C, axis, fx, nameOf, shortName } from '../lib'
 import { Disclosure, Health, Hint, Metric } from '../ui'
@@ -13,6 +14,7 @@ const ACTION = { increase: 'Increase', decrease: 'Decrease', hold: 'Hold', pause
 export default function Optimizer({ company }) {
   const { data, error, reload } = useApi('/plan', { company_id: company })
   const [sel, setSel] = useState(null)
+  const [approved, setApproved] = useState(null)       // { rec, result } of the last approval: reveals the Projected Impact view
   const cmap = useMemo(() => Object.fromEntries((data?.candidates ?? []).map((c) => [c.campaign_id, c])), [data])
   if (!data) return <div className="page"><Loading error={error} /></div>
   const t = data.totals, w = data.next_rupee
@@ -80,12 +82,14 @@ export default function Optimizer({ company }) {
         </section>
       )}
 
+      {approved && <ProjectedImpact key={approved.rec.rec_id} company={company} rec={approved.rec} result={approved.result} />}
+
       <section aria-labelledby="moves-h">
         <div className="row between wrap" style={{ marginBottom: 10 }}>
           <h3 id="moves-h" className="sec-h">Where budget moves</h3>
-          <span className="muted small">{moves.length} actions · ranked by expected incremental profit</span>
+          <span className="muted small">{moves.length} actions · ranked by expected incremental profit · approving one reveals its projected impact</span>
         </div>
-        <Moves moves={moves} reload={reload} />
+        <Moves moves={moves} reload={reload} onApproved={(rec, result) => setApproved({ rec, result })} />
       </section>
 
       <section className="card" aria-labelledby="alloc-h">
@@ -117,13 +121,13 @@ export default function Optimizer({ company }) {
   )
 }
 
-function Moves({ moves, reload }) {
+function Moves({ moves, reload, onApproved }) {
   const [all, setAll] = useState(false)
   if (!moves.length) return <div className="card empty">No move clears the guardrails under this policy.</div>
   const shown = all ? moves : moves.slice(0, 3)
   return (
     <>
-      <div className="stack">{shown.map((r, i) => <RecCard key={r.rec_id} rec={r} top={i === 0} onDecided={reload} expanded={false} />)}</div>
+      <div className="stack">{shown.map((r, i) => <RecCard key={r.rec_id} rec={r} top={i === 0} onDecided={(res) => { if (res.status === 'approved') onApproved(r, res); reload() }} expanded={false} />)}</div>
       {moves.length > 3 && <button className="btn ghost small" style={{ marginTop: 10 }} onClick={() => setAll(!all)}>{all ? 'Show top 3' : `Show all ${moves.length} actions`}</button>}
     </>
   )
